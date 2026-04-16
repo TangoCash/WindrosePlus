@@ -1054,7 +1054,7 @@
         async function sendRconCommand(command) {
             appendOutput('> ' + command, 'rcon-cmd');
 
-           
+            try {
                 const res = await fetch('/api/rcon', {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
@@ -1352,7 +1352,7 @@
         }
 
         async function fetchAuditLog() {
-           
+            try {
                 const res = await fetch('/api/rcon/log');
                 const entries = await res.json();
 
