@@ -104,6 +104,10 @@ Restart the server to apply multiplier changes. See [docs/config-reference.md](d
 
 Open the dashboard in your browser to manage your server. It includes a command console with autocomplete and a live Sea Chart showing player and mob positions in real-time.
 
+![Console](docs/screenshots/console.png)
+
+![Sea Chart](docs/screenshots/seachart.png)
+
 The map generates automatically the first time a player connects.
 
 ### Commands
