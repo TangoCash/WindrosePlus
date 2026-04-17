@@ -258,11 +258,8 @@ try {
 Write-Host ""
 Write-Host "  Windrose+ installed." -ForegroundColor Green
 Write-Host ""
-Write-Host "  Start server (rebuilds config overrides, recommended):" -ForegroundColor Cyan
-Write-Host "    StartWindrosePlusServer.bat"
-Write-Host ""
-Write-Host "  Start server (skips override rebuild — use only when config hasn't changed):" -ForegroundColor DarkGray
-Write-Host "    WindroseServer.exe"
+Write-Host "  Start server:" -ForegroundColor Cyan
+Write-Host "    StartWindrosePlusServer.bat   (always use this — it rebuilds the override PAK when config changes)"
 Write-Host ""
 Write-Host "  Start dashboard:" -ForegroundColor Cyan
 Write-Host "    windrose_plus\start_dashboard.bat"
