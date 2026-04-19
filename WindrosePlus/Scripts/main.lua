@@ -333,10 +333,10 @@ local function checkAndTriggerTileGen()
         return
     end
 
-    -- Run tile generator (check windrose_plus_http first, then tools/)
+    -- Run tile generator (check tools/ first, then windrose_plus_http/ for alt deploy layouts)
     local candidates = {
-        gameDir .. "windrose_plus_http\\generateTiles.ps1",
         gameDir .. "tools\\generateTiles.ps1",
+        gameDir .. "windrose_plus_http\\generateTiles.ps1",
     }
     local ps1 = nil
     for _, path in ipairs(candidates) do
