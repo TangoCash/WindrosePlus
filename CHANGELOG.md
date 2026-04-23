@@ -1,5 +1,17 @@
 # Changelog
 
+## [1.0.11] - 2026-04-23
+
+### Fixed
+
+- **Avoided accidental idle CPU limiter re-enables on upgrade.** Self-hosted installs now require either `windrose_plus_data\idle_cpu_limiter_enabled` or a custom `idle_cpu_limiter_cpu_rate.txt` before the installer enables the limiter. Fresh and upgraded installs remain disabled unless the server owner opts in.
+- **Made multiplier PAK no-op handling explicit.** `points_per_level` is ignored when deciding whether a multiplier PAK is expected, stale multiplier PAKs are removed when there are no active PAK-backed multipliers, and active non-default multipliers now fail loudly if no files were modified.
+- **Reloaded RCON config before password checks.** Dashboard/RCON password changes now apply on the next command instead of requiring a server restart.
+
+### Changed
+
+- Release packaging now fetches the bundled C++ mod DLLs from a pinned release tag and verifies SHA-256 hashes before building the public ZIP.
+
 ## [1.0.10] - 2026-04-23
 
 ### Fixed
@@ -132,6 +144,7 @@ Initial public release.
 - **Lua mod API** — custom commands, player events, tick callbacks, hot-reload
 - **Automated installer** — auto-detects game folder, downloads UE4SS, preserves configs on update
 
+[1.0.11]: https://github.com/HumanGenome/WindrosePlus/releases/tag/v1.0.11
 [1.0.10]: https://github.com/HumanGenome/WindrosePlus/releases/tag/v1.0.10
 [1.0.9]: https://github.com/HumanGenome/WindrosePlus/releases/tag/v1.0.9
 [1.0.8]: https://github.com/HumanGenome/WindrosePlus/releases/tag/v1.0.8
