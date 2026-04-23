@@ -7,6 +7,7 @@
 #include <algorithm>
 #include <chrono>
 #include <cctype>
+#include <cstdint>
 #include <filesystem>
 #include <fstream>
 #include <optional>
@@ -43,7 +44,15 @@ private:
     int m_appliedCpuRate = 0;
     bool m_isIdle = false;
     bool m_limitApplied = false;
+    bool m_seenBackendLogin = false;
+    bool m_seenP2pListen = false;
+    bool m_bootReadyLogged = false;
+    int m_idleStatusTicks = 0;
     HANDLE m_job = nullptr;
+    std::uintmax_t m_logOffset = 0;
+    std::optional<std::filesystem::file_time_type> m_lastStatusWriteSeen;
+    std::filesystem::file_time_type m_bootReadyFileClock = std::filesystem::file_time_type::min();
+    std::chrono::steady_clock::time_point m_connectionGraceUntil = std::chrono::steady_clock::time_point::min();
     std::chrono::steady_clock::time_point m_startedAt = std::chrono::steady_clock::now();
     std::chrono::steady_clock::time_point m_lastStatusRead = std::chrono::steady_clock::time_point::min();
 
@@ -86,6 +95,7 @@ private:
         }
 
         refreshCpuRate(*dataDir);
+        refreshConnectionState(*dataDir);
         refreshPlayerState(*dataDir);
         applyCpuRate(shouldLimitIdleCpu());
     }
@@ -106,8 +116,72 @@ private:
     }
 
     bool shouldLimitIdleCpu() const {
-        const auto uptime = std::chrono::steady_clock::now() - m_startedAt;
-        return m_isIdle && uptime >= std::chrono::seconds(45);
+        const auto now = std::chrono::steady_clock::now();
+        if (now < m_connectionGraceUntil) {
+            return false;
+        }
+        if (!isBootReady() || m_idleStatusTicks < 3) {
+            return false;
+        }
+        return m_isIdle;
+    }
+
+    void refreshConnectionState(const std::filesystem::path& dataDir) {
+        const auto logPath = dataDir.parent_path() / "R5" / "Saved" / "Logs" / "R5.log";
+        std::error_code ec;
+        const auto size = std::filesystem::file_size(logPath, ec);
+        if (ec) {
+            return;
+        }
+
+        if (size < m_logOffset) {
+            m_logOffset = 0;
+        }
+
+        if (size == m_logOffset) {
+            return;
+        }
+
+        std::ifstream file(logPath, std::ios::binary);
+        if (!file) {
+            return;
+        }
+
+        file.seekg(static_cast<std::streamoff>(m_logOffset), std::ios::beg);
+        std::string chunk((std::istreambuf_iterator<char>(file)), std::istreambuf_iterator<char>());
+        m_logOffset = size;
+
+        refreshBootReadiness(chunk);
+        if (!containsConnectionActivity(chunk)) {
+            return;
+        }
+
+        const auto now = std::chrono::steady_clock::now();
+        const auto newGraceUntil = now + std::chrono::seconds(180);
+        if (now >= m_connectionGraceUntil) {
+            Output::send<LogLevel::Verbose>(
+                STR("[IdleCpuLimiter] detected connection activity; lifting idle CPU cap for 180 seconds\n"));
+        }
+        m_connectionGraceUntil = newGraceUntil;
+    }
+
+    void refreshBootReadiness(const std::string& text) {
+        if (text.find("Login finished successfully") != std::string::npos) {
+            m_seenBackendLogin = true;
+        }
+
+        if (text.find("Initialized as an R5P2P listen server") != std::string::npos) {
+            m_seenP2pListen = true;
+        }
+
+        if (isBootReady() && !m_bootReadyLogged) {
+            m_bootReadyLogged = true;
+            m_bootReadyFileClock = std::filesystem::file_time_type::clock::now();
+            m_idleStatusTicks = 0;
+            m_lastStatusWriteSeen.reset();
+            Output::send<LogLevel::Verbose>(
+                STR("[IdleCpuLimiter] boot readiness detected; idle CPU cap may apply after fresh idle status ticks\n"));
+        }
     }
 
     void refreshCpuRate(const std::filesystem::path& dataDir) {
@@ -128,24 +202,43 @@ private:
         const auto lastWrite = std::filesystem::last_write_time(statusPath, ec);
         if (ec) {
             m_isIdle = false;
+            m_idleStatusTicks = 0;
             return;
         }
 
         const auto age = std::filesystem::file_time_type::clock::now() - lastWrite;
         if (age > std::chrono::seconds(120)) {
             m_isIdle = false;
+            m_idleStatusTicks = 0;
+            m_lastStatusWriteSeen.reset();
             return;
         }
 
         std::ifstream file(statusPath);
         if (!file) {
             m_isIdle = false;
+            m_idleStatusTicks = 0;
             return;
         }
 
         const std::string json((std::istreambuf_iterator<char>(file)), std::istreambuf_iterator<char>());
         const auto playerCount = parsePlayerCount(json);
         m_isIdle = playerCount.has_value() && *playerCount == 0;
+        if (lastWrite <= m_bootReadyFileClock) {
+            m_idleStatusTicks = 0;
+            return;
+        }
+
+        const bool freshStatusWrite = !m_lastStatusWriteSeen.has_value() || *m_lastStatusWriteSeen != lastWrite;
+        if (freshStatusWrite) {
+            m_lastStatusWriteSeen = lastWrite;
+        }
+
+        if (m_isIdle && freshStatusWrite) {
+            m_idleStatusTicks = std::min(m_idleStatusTicks + 1, 100);
+        } else if (!m_isIdle) {
+            m_idleStatusTicks = 0;
+        }
     }
 
     void applyCpuRate(bool shouldLimit) {
@@ -198,6 +291,25 @@ private:
             return std::nullopt;
         }
         return count;
+    }
+
+    bool isBootReady() const {
+        return m_seenBackendLogin && m_seenP2pListen;
+    }
+
+    bool containsConnectionActivity(const std::string& text) const {
+        return text.find("LogNet: Login request:") != std::string::npos ||
+            text.find("LogNet: Join request:") != std::string::npos ||
+            text.find("OnAccountUePrelogin") != std::string::npos ||
+            text.find("OnAccountUeLogin") != std::string::npos ||
+            text.find("UE account verified") != std::string::npos ||
+            text.find("Create R5IceConnection") != std::string::npos ||
+            text.find("P2p proxy created") != std::string::npos ||
+            text.find("Start connection to remote") != std::string::npos ||
+            text.find("Added remote candidates") != std::string::npos ||
+            text.find("Data connection is ready") != std::string::npos ||
+            text.find("StartGrpcProxyServerForP2p") != std::string::npos ||
+            text.find("GsStream P2pClient") != std::string::npos;
     }
 };
 
