@@ -4,6 +4,8 @@
 
 ### Fixed
 
+- **Added dashboard Character Repair for known progression drift ([#24](https://github.com/HumanGenome/WindrosePlus/issues/24)).** The authenticated dashboard now has a `/repair` page that accepts a zipped local `SaveProfiles` folder, runs a bundled fail-closed repair tool, and returns `windrose-save-repaired.zip`. Safe mode only fixes the known no-spend `RewardLevel < CurrentLevel` drift and refuses spent-point or unknown save shapes instead of hand-editing BSON.
+- **Stopped presenting `wp.givestats` / `points_per_level` as working point grants ([#18](https://github.com/HumanGenome/WindrosePlus/issues/18)).** `wp.givestats` now says exactly what it does: records an audit note only. `points_per_level` is documented and kept as a disabled/no-op compatibility key because its PAK path can corrupt progression saves.
 - **Prevented high-risk inventory multiplier builds from combining with conflicting PAK mods ([#25](https://github.com/HumanGenome/WindrosePlus/issues/25)).** When `inventory_size`, `stack_size`, or `weight` is non-default, the PAK builder now scans installed third-party PAKs before writing `WindrosePlus_Multipliers_P.pak`. If another PAK also contains inventory assets, the build stops with a restore-from-backup warning and removes any existing generated multiplier PAK so a stale high-risk override cannot load. Advanced admins can set `WINDROSEPLUS_ALLOW_PAK_CONFLICTS=1` after testing the exact PAK combination.
 - **Made dashboard RCON timeouts diagnosable instead of generic ([#13](https://github.com/HumanGenome/WindrosePlus/issues/13)).** The Lua command worker now writes a heartbeat, recovers a stale `pending_commands.processing` batch after restart, and records command-worker errors. The dashboard writes command files atomically and reports whether the worker is missing, stale, failed to consume a command, or consumed it without returning a response.
 - **Fixed Sea Chart tile generation on Linux/Docker installs ([#21](https://github.com/HumanGenome/WindrosePlus/issues/21)).** The map export path now includes the normal installed `windrose_plus\tools\generateTiles.ps1` location, the dashboard records `map_generation_status.json`, and tile rendering no longer depends on `System.Drawing`, which is not reliable under Linux PowerShell. PNG tiles are written by a bundled cross-platform renderer instead.
@@ -61,7 +63,7 @@
 
 ### Fixed
 
-- **`points_per_level` multiplier disabled — character-corruption crash ([#20](https://github.com/HumanGenome/WindrosePlus/issues/20), [#4](https://github.com/HumanGenome/WindrosePlus/issues/4)).** Patching `TalentPointsReward` / `StatPointsReward` / `PointsReward` / `SkillPoints` / `AttributePoints` in `DA_HeroLevels.json` caused the engine's `R5BLPlayer_ValidateData` rule to fail `RewardLevel < CurrentLevel`, crashing the server with `R5GameProblems.cpp:211` the moment the affected character tried to join. Isolated to a single-file PAK with `pts=3` alone on a virgin world — still crashes. `MultiplierPakBuilder.ps1` now skips the `points_per_level` patch path entirely; config still accepts the key for future re-enablement but applies no modifications. `wp.givestats` remains the supported way to grant extra points.
+- **`points_per_level` multiplier disabled — character-corruption crash ([#20](https://github.com/HumanGenome/WindrosePlus/issues/20), [#4](https://github.com/HumanGenome/WindrosePlus/issues/4)).** Patching `TalentPointsReward` / `StatPointsReward` / `PointsReward` / `SkillPoints` / `AttributePoints` in `DA_HeroLevels.json` caused the engine's `R5BLPlayer_ValidateData` rule to fail `RewardLevel < CurrentLevel`, crashing the server with `R5GameProblems.cpp:211` the moment the affected character tried to join. Isolated to a single-file PAK with `pts=3` alone on a virgin world — still crashes. `MultiplierPakBuilder.ps1` now skips the `points_per_level` patch path entirely; config still accepts the key for compatibility but applies no modifications.
 - **Surface AV-quarantine as the cause when `repak.exe` / `retoc.exe` are missing ([#19](https://github.com/HumanGenome/WindrosePlus/issues/19)).** `WindrosePlus-BuildPak.ps1` now detects a missing binary under `tools\bin\` and explicitly calls out Windows Defender / third-party AV quarantine as the most likely cause, with allowlist instructions.
 - **Idle Windrose servers no longer burn full CPU cores while waiting for players.** Replaced the old affinity-based idle optimizer with a C++ `IdleCpuLimiter` UE4SS mod that applies a Windows Job Object CPU hard cap only while the server is confirmed idle. The default idle cap is 2% total CPU, the cap is lifted automatically when players are present, the process keeps its full CPU affinity mask, and the limiter fails open if player status is missing or stale.
 - **Removed the Lua affinity signal path.** Windrose+ no longer writes affinity request files or changes process affinity when servers enter idle/active mode.
@@ -97,18 +99,18 @@
 
 ### Notes
 
-Issue [#4](https://github.com/HumanGenome/WindrosePlus/issues/4) (per-level stat rewards skipped when XP gain crosses multiple levels) remains open. The required engine-level catchup hook on `R5HeroLevelUpComponent` is still risky to register inside Windrose's UE4SS host (other RegisterHook attempts have crashed the server in earlier dev passes), so the fix stays deferred. `wp.givestats` (added in 1.0.4) is the manual compensation path; it still records to `windrose_plus_data/stat_grants_queue.log` for audit.
+Issue [#4](https://github.com/HumanGenome/WindrosePlus/issues/4) (per-level stat rewards skipped when XP gain crosses multiple levels) remains open. The required engine-level catchup hook on `R5HeroLevelUpComponent` is still risky to register inside Windrose's UE4SS host (other RegisterHook attempts have crashed the server in earlier dev passes), so the fix stays deferred. `wp.givestats` (added in 1.0.4) records compensation notes to `windrose_plus_data/stat_grants_queue.log` for audit only.
 
 ## [1.0.4] - 2026-04-18
 
 ### Added
 
-- **`wp.givestats <player> <stat_count> [talent_count]` admin command.** Records stat/talent point grant requests to a per-server queue file (`windrose_plus_data/stat_grants_queue.log`) so server owners can audit who needs compensation for [#4](https://github.com/HumanGenome/WindrosePlus/issues/4) — characters that level up multiple times in a single XP gain only fire one stat-point reward, even though they cleared several levels at once. Each invocation appends a timestamped JSON entry; the in-game application of those points lands in v1.0.5 alongside the level-up catchup hook (see notes below). Range `1`–`100` per axis. Player names with spaces are supported.
+- **`wp.givestats <player> <stat_count> [talent_count]` admin command.** Records stat/talent point compensation notes to a per-server queue file (`windrose_plus_data/stat_grants_queue.log`) so server owners can audit who needs compensation for [#4](https://github.com/HumanGenome/WindrosePlus/issues/4) — characters that level up multiple times in a single XP gain only fire one stat-point reward, even though they cleared several levels at once. This command is audit-only and does not change the character in-game. Range `1`–`100` per axis. Player names with spaces are supported.
 - **Append-only `windrose_plus_data/events.log`.** Line-delimited JSON records every player join and leave so external server-management tools can `tail -F` the file without polling the HTTP API or scraping the dashboard. Each entry has `ts`, `type`, `player`, and best-effort `x`/`y`/`z` (coordinates are populated only when the join/leave poller resolved a pawn position — they may be missing for very fast disconnects). Events derive from the same poll-based detector that powers the in-game player list, so a transient query miss can produce a spurious leave/rejoin pair; consumers should treat sub-second flips as noise. Existing in-process `WindrosePlus.API.onPlayerJoin` / `onPlayerLeave` callbacks are unchanged — this is an additive file-based channel for tools that don't run inside Lua.
 
 ### Notes for the next release
 
-Issue [#4](https://github.com/HumanGenome/WindrosePlus/issues/4) (per-level stat rewards skipped when XP gain crosses multiple levels) is a base-game level-up event firing once per XP packet. The fix needs an in-game catchup hook on `R5HeroLevelUpComponent` to walk the levels gained and award the missed `StatPointsReward` / `TalentPointsReward` values one at a time. Until that lands, `wp.givestats` is the manual compensation path.
+Issue [#4](https://github.com/HumanGenome/WindrosePlus/issues/4) (per-level stat rewards skipped when XP gain crosses multiple levels) is a base-game level-up event firing once per XP packet. The fix needs an in-game catchup hook on `R5HeroLevelUpComponent` to walk the levels gained and award the missed `StatPointsReward` / `TalentPointsReward` values one at a time. Until that lands, `wp.givestats` is only an audit trail for manual follow-up.
 
 ## [1.0.3] - 2026-04-18
 
@@ -164,7 +166,7 @@ Initial public release.
 
 ### What's included
 
-- **8 multipliers** — loot, XP, stack size, craft cost, crop speed, weight, inventory size, points per level
+- **7 active multipliers** — loot, XP, stack size, craft cost, crop speed, weight, inventory size
 - **2,400+ INI settings** — player stats, talents, weapons, food, gear, creatures, co-op scaling
 - **30 admin commands** — server monitoring, player info, entity counts, diagnostics, config management
 - **Web dashboard** — password-protected console with autocomplete and Sea Chart live map

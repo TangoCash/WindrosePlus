@@ -219,6 +219,21 @@ HumanGenome: 2h 15m
 CaptainMorgan: 0h 42m
 ```
 
+### wp.givestats
+
+Record a stat/talent compensation note in `windrose_plus_data\stat_grants_queue.log`.
+
+This is audit-only. It does **not** change the character in-game and it does not repair `RewardLevel < CurrentLevel` crashes. Use the dashboard Character Repair page for the known progression-drift repair workflow.
+
+```
+Usage: wp.givestats <player> <stat_count> [talent_count]
+```
+
+```
+> wp.givestats HumanGenome 3 2
+Recorded audit note: HumanGenome +3 stat +2 talent. This does not change the character in-game.
+```
+
 ---
 
 ## World
@@ -517,6 +532,7 @@ The web dashboard exposes a REST API for external tools and integrations. All en
 | GET | `/api/mods` | Yes | Installed third-party mods |
 | GET | `/api/rcon/log` | Yes | Recent RCON command audit log |
 | POST | `/api/rcon` | Yes | Execute an RCON command |
+| POST | `/api/character-repair` | Yes | Upload a local SaveProfiles zip and download a repaired zip for known progression drift |
 
 ### POST /api/rcon
 

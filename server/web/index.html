@@ -835,6 +835,25 @@
             color: var(--accent);
             border-color: var(--border-strong);
         }
+        .dashboard-link {
+            color: var(--text-dim);
+            background: transparent;
+            border: 1px solid var(--border);
+            font-family: 'Cinzel', serif;
+            font-size: 0.72rem;
+            font-weight: 700;
+            letter-spacing: 0.12em;
+            text-transform: uppercase;
+            cursor: pointer;
+            border-radius: 4px;
+            transition: all 0.2s;
+            text-decoration: none;
+            padding: 6px 10px;
+        }
+        .dashboard-link:hover {
+            color: var(--accent);
+            border-color: var(--accent);
+        }
         .tab-content { display: none; flex: 1; min-height: 0; flex-direction: column; }
         .tab-content.active { display: flex; }
         #seachart-pane { position: relative; }
@@ -879,6 +898,7 @@
                 <div class="dashboard-tabs">
                     <button class="dashboard-tab active" data-tab="console">CONSOLE</button>
                     <button class="dashboard-tab" data-tab="seachart">SEA CHART</button>
+                    <a class="dashboard-link" href="/repair">REPAIR</a>
                 </div>
                 <span id="status-badge">CONNECTING</span>
             </div>

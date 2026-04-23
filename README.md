@@ -32,7 +32,7 @@ A real-time map of your server showing player positions, creature locations, and
 ![Sea Chart](docs/screenshots/seachart.png)
 
 ### Admin Console (RCON)
-Run commands from a web dashboard with autocomplete. Check who's online, view server stats, monitor performance, and manage your server remotely. 30 built-in commands out of the box.
+Run commands from a web dashboard with autocomplete. Check who's online, view server stats, repair known character-save drift, monitor performance, and manage your server remotely. 30 built-in commands out of the box.
 
 ![Console](docs/screenshots/console.png)
 
@@ -63,7 +63,7 @@ Windrose dedicated servers don't respond to standard server queries, so your ser
 ### 2,400+ Server Settings & Multipliers
 Adjust XP, loot, crafting costs, crop speed, cooking/smelting speed, harvest yield, inventory size, carry weight, and more through a simple JSON file. Go deeper with 2,400+ individual INI settings for player stats, weapons, food effects, creature stats, co-op scaling, swimming, and rest bonuses.
 
-> **Note on `stack_size` and `points_per_level`:** `stack_size` patches the server PAK but has no effect on vanilla clients — `MaxCountInSlot` is enforced client-side, so the knob only works if every connected client loads a matching PAK ([#17](https://github.com/HumanGenome/WindrosePlus/issues/17)). `points_per_level` is disabled as of v1.0.8 because it crashes the server on character login ([#20](https://github.com/HumanGenome/WindrosePlus/issues/20)); use `wp.givestats` instead to grant extra points.
+> **Note on `stack_size` and `points_per_level`:** `stack_size` patches the server PAK but has no effect on vanilla clients — `MaxCountInSlot` is enforced client-side, so the knob only works if every connected client loads a matching PAK ([#17](https://github.com/HumanGenome/WindrosePlus/issues/17)). `points_per_level` is disabled as of v1.0.8 because it crashes the server on character login ([#20](https://github.com/HumanGenome/WindrosePlus/issues/20)). `wp.givestats` only records an audit note; it does not change a character in-game.
 
 > **Save-safety warning:** `inventory_size`, `stack_size`, `weight`, and other inventory-affecting PAK edits can become part of player save state once a character logs in and saves. Take an out-of-band save backup before enabling them. Windrose+ now refuses to build these high-risk multiplier PAKs when another installed PAK also edits inventory assets, and removes the existing generated multiplier PAK on that failure, unless an advanced admin deliberately sets `WINDROSEPLUS_ALLOW_PAK_CONFLICTS=1`.
 
@@ -78,7 +78,6 @@ Adjust XP, loot, crafting costs, crop speed, cooking/smelting speed, harvest yie
   "cooking_speed": 2.0,
   "harvest_yield": 2.0,
   "inventory_size": 2.0,
-  "points_per_level": 2.0,
   "weight": 1.0
 }
 ```
@@ -162,6 +161,19 @@ Use the default `2.0` percent unless you have a reason to tune it. Raise it if p
 [IdleCpuLimiter] applied idle CPU rate 200
 [IdleCpuLimiter] lifted idle CPU rate 10000
 ```
+
+### Character Repair
+The dashboard includes a Character Repair page at `/repair` for the known progression drift crash where the server log shows `RewardLevel < CurrentLevel` during `R5BLPlayer_ValidateData`.
+
+The repair page works on a client save zip, not the server world save:
+
+1. Close Windrose completely.
+2. Zip `%LOCALAPPDATA%\R5\Saved\SaveProfiles\<your-steamid-folder>`.
+3. Open the Windrose+ dashboard, go to **Repair**, and upload the zip.
+4. Download `windrose-save-repaired.zip`.
+5. Extract it back into `%LOCALAPPDATA%\R5\Saved\SaveProfiles\` and replace the old files.
+
+Safe mode only fixes no-spend progression drift. If the save has spent-point drift or a different corruption type, Windrose+ refuses the repair instead of guessing.
 
 ---
 

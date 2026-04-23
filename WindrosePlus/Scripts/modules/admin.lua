@@ -935,14 +935,14 @@ function Admin._registerCommands()
         end
     }
 
-    -- wp.givestats: queue a stat-point compensation for a player.
+    -- wp.givestats: record a stat-point compensation note for a player.
     -- Use case: when xp_multiplier was raised on a server with existing characters,
     -- the engine fires only one StatPointsReward per XP gain so players "skip"
-    -- earned points across multiple levels. This command records a grant request
-    -- to windrose_plus_data\stat_grants_queue.log for offline reconciliation.
+    -- earned points across multiple levels. There is no safe live applier yet;
+    -- this command only records an auditable note.
     -- Issue: HumanGenome/WindrosePlus#4
     Admin._commands["wp.givestats"] = {
-        description = "Queue stat/talent point grant for a player (Issue #4 compensation)",
+        description = "Record stat/talent point compensation note (audit only)",
         usage = "wp.givestats <player> <stat_count> [talent_count]",
         category = "players",
         examples = {"wp.givestats Alice 3", "wp.givestats Bob 5 2"},
@@ -979,25 +979,26 @@ function Admin._registerCommands()
 
             local entry = {
                 ts = os.time(),
-                type = "stat_grant_request",
+                type = "stat_compensation_note",
                 player = target,
                 stat_points = statCount,
                 talent_points = talentCount,
                 connected_at_request = connected
             }
             local ok, line = pcall(json.encode, entry)
-            if not ok then return "Failed to encode grant request" end
+            if not ok then return "Failed to encode audit note" end
 
             if not Admin._gameDir then return "Game directory not initialized" end
             local queuePath = Admin._gameDir .. "windrose_plus_data\\stat_grants_queue.log"
             local f = io.open(queuePath, "a")
-            if not f then return "Failed to write grant queue at " .. queuePath end
+            if not f then return "Failed to write audit note at " .. queuePath end
             f:write(line .. "\n")
             f:close()
 
-            local msg = "Queued: " .. target .. " +" .. statCount .. " stat"
+            local msg = "Recorded audit note: " .. target .. " +" .. statCount .. " stat"
             if talentCount > 0 then msg = msg .. " +" .. talentCount .. " talent" end
-            if not connected then msg = msg .. " (player offline — applied on next reconciliation)" end
+            msg = msg .. ". This does not change the character in-game."
+            if not connected then msg = msg .. " Player was offline when recorded." end
             return msg
         end
     }

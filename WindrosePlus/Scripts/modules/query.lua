@@ -193,7 +193,6 @@ function Query._collectAndWrite()
             crop_speed = Query._config.getCropSpeedMultiplier(),
             weight = Query._config.getWeightMultiplier(),
             inventory_size = Query._config.getInventorySizeMultiplier(),
-            points_per_level = Query._config.getPointsPerLevelMultiplier(),
             cooking_speed = Query._config.getCookingSpeedMultiplier(),
             harvest_yield = Query._config.getHarvestYieldMultiplier()
         },

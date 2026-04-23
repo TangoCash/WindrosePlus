@@ -358,6 +358,100 @@ function Send-File($context, $filePath) {
     $context.Response.Close()
 }
 
+function Send-DownloadFile($context, $filePath, $downloadName, $contentType = "application/octet-stream") {
+    if (-not (Test-Path -LiteralPath $filePath)) {
+        $context.Response.StatusCode = 404
+        $context.Response.Close()
+        return
+    }
+    $fileInfo = Get-Item -LiteralPath $filePath
+    $buffer = New-Object byte[] 65536
+    $stream = [System.IO.File]::OpenRead($filePath)
+    $context.Response.StatusCode = 200
+    $context.Response.ContentType = $contentType
+    $context.Response.Headers.Add("Content-Disposition", "attachment; filename=`"$downloadName`"")
+    $context.Response.Headers.Add("Cache-Control", "no-store")
+    $context.Response.ContentLength64 = $fileInfo.Length
+    try {
+        while (($read = $stream.Read($buffer, 0, $buffer.Length)) -gt 0) {
+            $context.Response.OutputStream.Write($buffer, 0, $read)
+        }
+    } finally {
+        $stream.Close()
+        $context.Response.Close()
+    }
+}
+
+function Read-RequestBodyToFile($context, $targetPath, $maxBytes) {
+    $total = 0L
+    $buffer = New-Object byte[] 65536
+    $stream = [System.IO.File]::Open($targetPath, [System.IO.FileMode]::CreateNew, [System.IO.FileAccess]::Write, [System.IO.FileShare]::None)
+    try {
+        while (($read = $context.Request.InputStream.Read($buffer, 0, $buffer.Length)) -gt 0) {
+            $total += $read
+            if ($total -gt $maxBytes) {
+                throw "Upload exceeds the $([Math]::Round($maxBytes / 1MB)) MB limit."
+            }
+            $stream.Write($buffer, 0, $read)
+        }
+    } finally {
+        $stream.Close()
+    }
+    return $total
+}
+
+function Format-RepairToolOutput($output, $repairRoot) {
+    $text = (($output | ForEach-Object { "$_" }) -join "`n").Trim()
+    if ($text -match "spent or allocated progression nodes|spent points detected") {
+        return "The uploaded save has spent or allocated progression nodes. Safe mode will not edit it automatically."
+    }
+    if ($text -match "no repairable progression drift") {
+        return "No known no-spend progression drift was found in the uploaded save."
+    }
+    if ($text -match "could not find SaveProfiles|could not resolve Players RocksDB|no PlayerId") {
+        return "The zip did not contain a supported SaveProfiles/<steamid>/RocksDB/0.10.0/Players folder."
+    }
+    if ($text -match "zip has too many entries|zip entry is too large|zip extracted size is too large|unsafe zip entry path|open zip archive") {
+        return "The upload is not a safe supported SaveProfiles zip. Recreate the zip from only your local SteamID profile folder."
+    }
+    if ($text -match "round-trip mismatch|decode BSON|R5BLPlayer|column family|missing or invalid tree path|tree path is not an array|tree node") {
+        return "The player save shape was not recognized, so no automatic repair was made."
+    }
+    if ($text -match "timed out") {
+        return "Repair timed out before a safe result was produced."
+    }
+    if ($text -match "Upload exceeds") {
+        return "The uploaded zip is larger than the 200 MB limit."
+    }
+    return "The repair tool could not safely repair this zip."
+}
+
+function Invoke-RepairTool($healExe, $auditLog, $uploadPath, $outputPath, $timeoutSeconds) {
+    $job = Start-Job -ScriptBlock {
+        param($exe, $audit, $inputZip, $repairedZip)
+        $toolOutput = & $exe --log-level warn --audit-log $audit repair-zip --input $inputZip --output $repairedZip --strategy safe 2>&1
+        $toolExitCode = $LASTEXITCODE
+        [pscustomobject]@{
+            ExitCode = $toolExitCode
+            Output = (($toolOutput | ForEach-Object { "$_" }) -join "`n")
+        }
+    } -ArgumentList $healExe, $auditLog, $uploadPath, $outputPath
+    try {
+        $done = Wait-Job $job -Timeout $timeoutSeconds
+        if (-not $done) {
+            Stop-Job $job -ErrorAction SilentlyContinue
+            return @{ ExitCode = -1; Output = "repair timed out" }
+        }
+        $result = Receive-Job $job
+        if (-not $result) {
+            return @{ ExitCode = -1; Output = "repair produced no result" }
+        }
+        return @{ ExitCode = [int]$result.ExitCode; Output = [string]$result.Output }
+    } finally {
+        Remove-Job $job -Force -ErrorAction SilentlyContinue
+    }
+}
+
 try {
     while ($listener.IsListening) {
         $context = $listener.GetContext()
@@ -724,11 +818,80 @@ try {
                     }
                     Send-Json $context $result
                 }
+                "/api/character-repair" {
+                    if ($method -ne "POST") {
+                        Send-Json $context @{ error = "POST required" } 405
+                        continue
+                    }
+
+                    $maxUploadBytes = 200MB
+                    if ($context.Request.ContentLength64 -gt $maxUploadBytes) {
+                        Send-Json $context @{ error = "Upload too large. Zip files must be 200 MB or smaller." } 413
+                        continue
+                    }
+                    $maxOutputBytes = 200MB
+
+                    $healExe = Join-Path $PSScriptRoot "..\tools\windrose-heal\windrose-heal.exe"
+                    if (-not (Test-Path -LiteralPath $healExe)) {
+                        Send-Json $context @{ error = "Character repair tool is missing. Reinstall Windrose+ from the latest release zip." } 503
+                        continue
+                    }
+
+                    $repairRoot = Join-Path $dataDir "character_repair"
+                    if (-not (Test-Path -LiteralPath $repairRoot)) {
+                        New-Item -ItemType Directory -Path $repairRoot -Force | Out-Null
+                    }
+
+                    $runId = "repair_" + [long][DateTimeOffset]::UtcNow.ToUnixTimeSeconds() + "_" + (Get-Random -Maximum 999999)
+                    $uploadPath = Join-Path $repairRoot "$runId-upload.zip"
+                    $outputPath = Join-Path $repairRoot "$runId-repaired.zip"
+                    $auditLog = Join-Path $dataDir "character_repair_audit.log"
+
+                    try {
+                        $uploadedBytes = Read-RequestBodyToFile $context $uploadPath $maxUploadBytes
+                        if ($uploadedBytes -lt 4) {
+                            throw "Uploaded file is empty or invalid."
+                        }
+
+                        $repairResult = Invoke-RepairTool $healExe $auditLog $uploadPath $outputPath 45
+                        $toolOutput = $repairResult.Output
+                        $exitCode = $repairResult.ExitCode
+                        if ($exitCode -ne 0 -or -not (Test-Path -LiteralPath $outputPath)) {
+                            Send-Json $context @{
+                                error = "No safe automatic repair was made."
+                                detail = Format-RepairToolOutput $toolOutput $repairRoot
+                            } 422
+                            continue
+                        }
+
+                        $outputInfo = Get-Item -LiteralPath $outputPath
+                        if ($outputInfo.Length -gt $maxOutputBytes) {
+                            Send-Json $context @{
+                                error = "Repair failed."
+                                detail = "The repaired zip is larger than the 200 MB limit."
+                            } 413
+                            continue
+                        }
+
+                        Send-DownloadFile $context $outputPath "windrose-save-repaired.zip" "application/zip"
+                    } catch {
+                        $statusCode = 422
+                        if ($_.Exception.Message -match "Upload exceeds") { $statusCode = 413 }
+                        Send-Json $context @{
+                            error = "Repair failed."
+                            detail = Format-RepairToolOutput $_.Exception.Message $repairRoot
+                        } $statusCode
+                    } finally {
+                        Remove-Item -LiteralPath $uploadPath -Force -ErrorAction SilentlyContinue
+                        Remove-Item -LiteralPath $outputPath -Force -ErrorAction SilentlyContinue
+                    }
+                }
                 default {
                     # Static file serving
                     $filePath = $path
                     if ($filePath -eq "" -or $filePath -eq "/") { $filePath = "/index.html" }
                     if ($filePath -eq "/livemap") { $filePath = "/livemap/index.html" }
+                    if ($filePath -eq "/repair") { $filePath = "/repair/index.html" }
 
                     # Serve map tiles from data directory
                     if ($filePath -match "^/livemap/tiles/(\d+)/(\d+)-(\d+)\.png$") {

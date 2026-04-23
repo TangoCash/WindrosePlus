@@ -120,7 +120,9 @@ function Config.getInventorySizeMultiplier()
 end
 
 function Config.getPointsPerLevelMultiplier()
-    return Config._clampFloat(Config.get("multipliers", "points_per_level"), 1.0, 1.0, 10.0, "points_per_level")
+    -- Disabled until Windrose exposes a safe progression path. The PAK builder
+    -- also skips this key because it can corrupt character progression saves.
+    return 1.0
 end
 
 function Config.getCookingSpeedMultiplier()
@@ -163,7 +165,7 @@ function Config._defaults()
         rcon = { enabled = false, port = 27320, password = "" },
         query = { enabled = true, interval_ms = 5000 },
         admin = { steam_ids = {} },
-        multipliers = { xp = 1.0, loot = 1.0, stack_size = 1.0, craft_cost = 1.0, crop_speed = 1.0, weight = 1.0, inventory_size = 1.0, points_per_level = 1.0, cooking_speed = 1.0, harvest_yield = 1.0 },
+        multipliers = { xp = 1.0, loot = 1.0, stack_size = 1.0, craft_cost = 1.0, crop_speed = 1.0, weight = 1.0, inventory_size = 1.0, cooking_speed = 1.0, harvest_yield = 1.0 },
         performance = { idle_cpu_limiter_enabled = false, idle_cpu_limit_percent = 2.0 },
         features = { unlock_all_recipes = false, unlock_all_ships = false },
         debug = { log_level = "info" }

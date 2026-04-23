@@ -91,12 +91,13 @@ Global server multipliers. `1.0` = default, `2.0` = double, `0.5` = half.
 | `harvest_yield` | `1` | Resource node yield (berries, ore, wood, herbs, etc.). Scales `Amount.Min`/`Max` per node; minimum stays at `1` after rounding. |
 | `weight` | `1` | Per-item weight (`2.0` makes items heavier, `0.5` lighter) |
 | `inventory_size` | `1` | Player / chest / ship / building inventory slot counts |
-| `points_per_level` | `1` | Talent / stat / skill points granted per level-up |
+| `points_per_level` | `1` | Disabled/no-op. Kept only so old configs still parse; changing it does not grant points. |
 
 Save-safety notes:
 
 - `inventory_size`, `stack_size`, `weight`, and similar inventory-affecting changes can become part of player save state after login/save. Back up saves before enabling them.
 - Windrose+ refuses to build high-risk inventory-affecting multiplier PAKs when another installed PAK also edits inventory assets, and removes the existing generated multiplier PAK on that failure so a stale override cannot load. Remove the conflicting PAKs before rebuilding, or set `WINDROSEPLUS_ALLOW_PAK_CONFLICTS=1` only after testing the exact combination and confirming you can restore from backup.
+- `points_per_level` is disabled because changing progression rewards can create `RewardLevel < CurrentLevel` character-save crashes. The dashboard Character Repair page can repair the known no-spend drift case from a zipped local `SaveProfiles` folder.
 - To fully disable Windrose+ during recovery testing, stop the server, rename `R5\Binaries\Win64\dwmapi.dll`, delete or move `R5\Content\Paks\WindrosePlus_Multipliers_P.pak` and `R5\Content\Paks\WindrosePlus_CurveTables_P.pak`, then delete `R5\Content\Paks\.windroseplus_build.hash`.
 
 ### [PlayerStats]
