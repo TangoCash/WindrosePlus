@@ -7,6 +7,33 @@ param(
 
 $ErrorActionPreference = "Stop"
 
+function ConvertTo-WindroseBool {
+    param(
+        $Value,
+        [bool]$Default = $false
+    )
+
+    if ($null -eq $Value) { return $Default }
+    if ($Value -is [bool]) { return $Value }
+
+    $text = ([string]$Value).Trim().ToLowerInvariant()
+    if ($text -in @("1", "true", "yes", "on", "enabled")) { return $true }
+    if ($text -in @("0", "false", "no", "off", "disabled")) { return $false }
+    return $Default
+}
+
+function Clamp-WindroseInt {
+    param(
+        [int]$Value,
+        [int]$Min,
+        [int]$Max
+    )
+
+    if ($Value -lt $Min) { return $Min }
+    if ($Value -gt $Max) { return $Max }
+    return $Value
+}
+
 Write-Host ""
 Write-Host "  Windrose+ Installer" -ForegroundColor Cyan
 Write-Host ""
@@ -114,16 +141,58 @@ Write-Host "  [2/3] Installing Windrose+ mod..." -NoNewline
 $modSource = Join-Path $scriptDir "WindrosePlus"
 $modDest = Join-Path $modsDir "WindrosePlus"
 $dataDir = Join-Path $gameDir "windrose_plus_data"
+$configPath = Join-Path $gameDir "windrose_plus.json"
 $idleLimiterDisabledPath = Join-Path $dataDir "idle_cpu_limiter_disabled"
 $idleLimiterEnabledPath = Join-Path $dataDir "idle_cpu_limiter_enabled"
 $idleLimiterRatePath = Join-Path $dataDir "idle_cpu_limiter_cpu_rate.txt"
 
 if (-not (Test-Path -LiteralPath $modsDir)) { New-Item -ItemType Directory -Path $modsDir -Force | Out-Null }
 if (-not (Test-Path -LiteralPath $dataDir)) { New-Item -ItemType Directory -Path $dataDir -Force | Out-Null }
-if (-not (Test-Path -LiteralPath $idleLimiterDisabledPath) -and -not (Test-Path -LiteralPath $idleLimiterEnabledPath) -and -not (Test-Path -LiteralPath $idleLimiterRatePath)) {
-    Set-Content $idleLimiterDisabledPath "IdleCpuLimiter is disabled by default. Delete this file, create idle_cpu_limiter_enabled, rerun install.ps1, and restart the server to opt in."
+
+$idleLimiterEnabled = $false
+$idleLimiterConfigured = $false
+$idleLimiterRate = $null
+
+if (Test-Path -LiteralPath $configPath) {
+    try {
+        $wpConfig = Get-Content -LiteralPath $configPath -Raw | ConvertFrom-Json
+        if ($wpConfig.performance -and $null -ne $wpConfig.performance.idle_cpu_limiter_enabled) {
+            $idleLimiterEnabled = ConvertTo-WindroseBool $wpConfig.performance.idle_cpu_limiter_enabled $false
+            $idleLimiterConfigured = $true
+        } elseif ($null -ne $wpConfig.idle_cpu_limiter_enabled) {
+            # Backward-compatible top-level key for early/manual configs.
+            $idleLimiterEnabled = ConvertTo-WindroseBool $wpConfig.idle_cpu_limiter_enabled $false
+            $idleLimiterConfigured = $true
+        }
+
+        if ($wpConfig.performance -and $null -ne $wpConfig.performance.idle_cpu_limit_percent) {
+            $idleLimiterRate = Clamp-WindroseInt ([int]([double]$wpConfig.performance.idle_cpu_limit_percent * 100)) 100 10000
+        } elseif ($wpConfig.performance -and $null -ne $wpConfig.performance.idle_cpu_limiter_cpu_rate) {
+            $idleLimiterRate = Clamp-WindroseInt ([int]$wpConfig.performance.idle_cpu_limiter_cpu_rate) 100 10000
+        }
+    } catch {
+        Write-Host "    WARN: Could not read windrose_plus.json performance settings. Idle CPU Limiter will stay disabled." -ForegroundColor Yellow
+    }
 }
-$idleLimiterDisabled = (Test-Path -LiteralPath $idleLimiterDisabledPath) -or (-not (Test-Path -LiteralPath $idleLimiterEnabledPath) -and -not (Test-Path -LiteralPath $idleLimiterRatePath))
+
+if (-not $idleLimiterConfigured) {
+    # Preserve v1.0.9-v1.0.11 marker-file opt-ins, but new installs remain disabled.
+    $idleLimiterEnabled = (-not (Test-Path -LiteralPath $idleLimiterDisabledPath)) -and ((Test-Path -LiteralPath $idleLimiterEnabledPath) -or (Test-Path -LiteralPath $idleLimiterRatePath))
+}
+
+if ($idleLimiterEnabled) {
+    if (Test-Path -LiteralPath $idleLimiterDisabledPath) { Remove-Item $idleLimiterDisabledPath -Force }
+    Set-Content $idleLimiterEnabledPath "IdleCpuLimiter enabled by windrose_plus.json performance.idle_cpu_limiter_enabled."
+    if ($idleLimiterRate -ne $null) {
+        Set-Content $idleLimiterRatePath ([string]$idleLimiterRate)
+    }
+} else {
+    Set-Content $idleLimiterDisabledPath "IdleCpuLimiter is disabled. Set performance.idle_cpu_limiter_enabled to true in windrose_plus.json, rerun install.ps1, and restart the server to opt in."
+    if (Test-Path -LiteralPath $idleLimiterEnabledPath) { Remove-Item $idleLimiterEnabledPath -Force }
+}
+
+$idleLimiterDisabled = -not $idleLimiterEnabled
+Write-Host "    Idle CPU Limiter: $(if ($idleLimiterEnabled) { 'enabled' } else { 'disabled' }) (windrose_plus.json performance setting)" -ForegroundColor DarkGray
 
 if (Test-Path -LiteralPath $modSource) {
     try {

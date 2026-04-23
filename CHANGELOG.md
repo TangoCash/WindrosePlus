@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.0.12] - 2026-04-23
+
+### Changed
+
+- **Moved Idle CPU Limiter opt-in to `windrose_plus.json`.** Self-hosted admins can now set `performance.idle_cpu_limiter_enabled` and `performance.idle_cpu_limit_percent` instead of creating marker files by hand. The installer still honors the old marker files for compatibility.
+- **Documented CPU limiter setup for normal server owners.** README and config reference now show the exact JSON block to enable or disable the limiter and explain when to raise the idle CPU percent.
+
 ## [1.0.11] - 2026-04-23
 
 ### Fixed
@@ -144,6 +151,7 @@ Initial public release.
 - **Lua mod API** — custom commands, player events, tick callbacks, hot-reload
 - **Automated installer** — auto-detects game folder, downloads UE4SS, preserves configs on update
 
+[1.0.12]: https://github.com/HumanGenome/WindrosePlus/releases/tag/v1.0.12
 [1.0.11]: https://github.com/HumanGenome/WindrosePlus/releases/tag/v1.0.11
 [1.0.10]: https://github.com/HumanGenome/WindrosePlus/releases/tag/v1.0.10
 [1.0.9]: https://github.com/HumanGenome/WindrosePlus/releases/tag/v1.0.9

@@ -1,14 +1,41 @@
 # Windrose+ Configuration Reference
 
-Windrose+ uses an INI override system. Default values ship in `.default.ini` files. To customize, copy the `.default.ini` to `.ini` (drop the `.default`) and edit only the values you want to change. Unmodified keys are left at game defaults.
+Windrose+ uses `windrose_plus.json` for everyday settings and optional `.ini` files for advanced game-balance overrides. Start with `windrose_plus.json` unless you specifically need one of the advanced tuning tables below.
 
 | File | Purpose |
 |------|---------|
-| `windrose_plus.ini` | Server settings, multipliers, player stats, talents, combat |
+| `windrose_plus.json` | Basic settings: multipliers, RCON, admins, performance options |
+| `windrose_plus.ini` | Advanced settings: player stats, talents, combat |
 | `windrose_plus.weapons.ini` | Per-weapon damage, crit, posture, special effects |
 | `windrose_plus.food.ini` | Food buffs, consumables, alchemy items |
 | `windrose_plus.gear.ini` | Armor sets, set bonuses, jewelry |
 | `windrose_plus.entities.ini` | Land and naval entity base stats |
+
+---
+
+## windrose_plus.json (Basic Config)
+
+This file is created automatically on first start. Edit it for common server-owner changes.
+
+### performance
+
+Idle CPU limiting is optional for self-hosted servers. It lowers CPU only when nobody is connected, then restores full CPU when activity is detected.
+
+| Key | Default | Description |
+|-----|---------|-------------|
+| `idle_cpu_limiter_enabled` | `false` | Set to `true` to opt in. After changing this, rerun `install.ps1` and restart the server. |
+| `idle_cpu_limit_percent` | `2.0` | Idle CPU cap as a percent of total CPU. Leave at `2.0` unless players report slow joins or loading timeouts. |
+
+Example:
+
+```json
+{
+    "performance": {
+        "idle_cpu_limiter_enabled": true,
+        "idle_cpu_limit_percent": 2.0
+    }
+}
+```
 
 ---
 

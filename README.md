@@ -138,21 +138,22 @@ Optional idle CPU limiting for hosts that want to reduce CPU use when nobody is 
 
 The limiter is disabled by default because Windrose can still report `player_count: 0` while a player is connecting, loading a character, or finishing the tutorial. Under a very low idle cap, that join path can time out before the player becomes visible to the status poller.
 
-For public/self-hosted installs, opt in by deleting:
+For public/self-hosted installs, opt in from `windrose_plus.json`:
 
-```text
-windrose_plus_data\idle_cpu_limiter_disabled
+```json
+{
+    "performance": {
+        "idle_cpu_limiter_enabled": true,
+        "idle_cpu_limit_percent": 2.0
+    }
+}
 ```
 
-Then create:
+Then rerun `install.ps1` and restart the server so UE4SS loads `IdleCpuLimiter`.
 
-```text
-windrose_plus_data\idle_cpu_limiter_enabled
-```
+To disable it again, set `idle_cpu_limiter_enabled` to `false`, rerun `install.ps1`, and restart. If the limiter is already loaded, the installer also writes a disabled marker so the cap is lifted on the next status check.
 
-Then rerun `install.ps1` and restart the server so UE4SS loads `IdleCpuLimiter`. The installer will restore `IdleCpuLimiter\enabled.txt` and set `IdleCpuLimiter : 1` in `ue4ss\Mods\mods.txt`.
-
-To disable it again, recreate `windrose_plus_data\idle_cpu_limiter_disabled`, remove `windrose_plus_data\idle_cpu_limiter_enabled`, rerun `install.ps1`, and restart the server. If the limiter is already loaded, creating the disabled marker also makes it lift the CPU cap on its next status check. You can also opt in and set a custom cap by writing a number to `windrose_plus_data\idle_cpu_limiter_cpu_rate.txt`; for example `1000` means 10% total CPU and `10000` effectively removes the cap.
+Use the default `2.0` percent unless you have a reason to tune it. Raise it if players report slow joins or loading timeouts; `10.0` means a 10% idle CPU cap.
 
 ```
 [IdleCpuLimiter] applied idle CPU rate 200
@@ -226,6 +227,10 @@ Example `windrose_plus.json`:
     "rcon": {
         "enabled": true,
         "password": "your-password-here"
+    },
+    "performance": {
+        "idle_cpu_limiter_enabled": false,
+        "idle_cpu_limit_percent": 2.0
     }
 }
 ```

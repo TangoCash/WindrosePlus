@@ -131,6 +131,14 @@ function Config.getHarvestYieldMultiplier()
     return Config._clampFloat(Config.get("multipliers", "harvest_yield"), 1.0, 0.1, 100.0, "harvest_yield")
 end
 
+function Config.isIdleCpuLimiterEnabled()
+    return Config.get("performance", "idle_cpu_limiter_enabled") == true
+end
+
+function Config.getIdleCpuLimitPercent()
+    return Config._clampFloat(Config.get("performance", "idle_cpu_limit_percent"), 2.0, 1.0, 100.0, "idle_cpu_limit_percent")
+end
+
 function Config.getAdminSteamIds()
     return Config.get("admin", "steam_ids") or {}
 end
@@ -155,6 +163,7 @@ function Config._defaults()
         query = { enabled = true, interval_ms = 5000 },
         admin = { steam_ids = {} },
         multipliers = { xp = 1.0, loot = 1.0, stack_size = 1.0, craft_cost = 1.0, crop_speed = 1.0, weight = 1.0, inventory_size = 1.0, points_per_level = 1.0, cooking_speed = 1.0, harvest_yield = 1.0 },
+        performance = { idle_cpu_limiter_enabled = false, idle_cpu_limit_percent = 2.0 },
         features = { unlock_all_recipes = false, unlock_all_ships = false },
         debug = { log_level = "info" }
     }

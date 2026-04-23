@@ -657,6 +657,7 @@ function Admin._registerCommands()
             table.insert(lines, "  Craft Cost: " .. Admin._config.getCraftCostMultiplier() .. "x")
             table.insert(lines, "  Crop Speed: " .. Admin._config.getCropSpeedMultiplier() .. "x")
             table.insert(lines, "  Weight: " .. Admin._config.getWeightMultiplier() .. "x")
+            table.insert(lines, "  Idle CPU Limiter: " .. (Admin._config.isIdleCpuLimiterEnabled() and ("enabled (" .. Admin._config.getIdleCpuLimitPercent() .. "%)") or "disabled"))
             table.insert(lines, "  RCON: " .. (Admin._config.isRconEnabled() and "enabled" or "disabled"))
             local mods = WindrosePlus._modules.Mods
             if mods then
