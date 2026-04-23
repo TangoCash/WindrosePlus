@@ -96,7 +96,7 @@ Global server multipliers. `1.0` = default, `2.0` = double, `0.5` = half.
 Save-safety notes:
 
 - `inventory_size`, `stack_size`, `weight`, and similar inventory-affecting changes can become part of player save state after login/save. Back up saves before enabling them.
-- Do not combine Windrose+ PAK overrides with other PAK mods that edit the same assets unless you have tested the exact combination and can restore from backup.
+- Windrose+ refuses to build high-risk inventory-affecting multiplier PAKs when another installed PAK also edits inventory assets, and removes the existing generated multiplier PAK on that failure so a stale override cannot load. Remove the conflicting PAKs before rebuilding, or set `WINDROSEPLUS_ALLOW_PAK_CONFLICTS=1` only after testing the exact combination and confirming you can restore from backup.
 - To fully disable Windrose+ during recovery testing, stop the server, rename `R5\Binaries\Win64\dwmapi.dll`, delete or move `R5\Content\Paks\WindrosePlus_Multipliers_P.pak` and `R5\Content\Paks\WindrosePlus_CurveTables_P.pak`, then delete `R5\Content\Paks\.windroseplus_build.hash`.
 
 ### [PlayerStats]

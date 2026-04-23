@@ -1,5 +1,14 @@
 # Changelog
 
+## [1.0.14] - 2026-04-23
+
+### Fixed
+
+- **Prevented high-risk inventory multiplier builds from combining with conflicting PAK mods ([#25](https://github.com/HumanGenome/WindrosePlus/issues/25)).** When `inventory_size`, `stack_size`, or `weight` is non-default, the PAK builder now scans installed third-party PAKs before writing `WindrosePlus_Multipliers_P.pak`. If another PAK also contains inventory assets, the build stops with a restore-from-backup warning and removes any existing generated multiplier PAK so a stale high-risk override cannot load. Advanced admins can set `WINDROSEPLUS_ALLOW_PAK_CONFLICTS=1` after testing the exact PAK combination.
+- **Made dashboard RCON timeouts diagnosable instead of generic ([#13](https://github.com/HumanGenome/WindrosePlus/issues/13)).** The Lua command worker now writes a heartbeat, recovers a stale `pending_commands.processing` batch after restart, and records command-worker errors. The dashboard writes command files atomically and reports whether the worker is missing, stale, failed to consume a command, or consumed it without returning a response.
+- **Fixed Sea Chart tile generation on Linux/Docker installs ([#21](https://github.com/HumanGenome/WindrosePlus/issues/21)).** The map export path now includes the normal installed `windrose_plus\tools\generateTiles.ps1` location, the dashboard records `map_generation_status.json`, and tile rendering no longer depends on `System.Drawing`, which is not reliable under Linux PowerShell. PNG tiles are written by a bundled cross-platform renderer instead.
+- **Fixed CurveTable extraction missing the global ScriptObjects container ([#22](https://github.com/HumanGenome/WindrosePlus/issues/22)).** The builder now invokes `retoc to-legacy` against the full `R5\Content\Paks` directory instead of only `pakchunk0-WindowsServer.utoc`, so retoc can see companion containers such as `global.utoc` when converting CurveTable assets.
+
 ## [1.0.13] - 2026-04-23
 
 ### Fixed
@@ -164,6 +173,7 @@ Initial public release.
 - **Lua mod API** — custom commands, player events, tick callbacks, hot-reload
 - **Automated installer** — auto-detects game folder, downloads UE4SS, preserves configs on update
 
+[1.0.14]: https://github.com/HumanGenome/WindrosePlus/releases/tag/v1.0.14
 [1.0.13]: https://github.com/HumanGenome/WindrosePlus/releases/tag/v1.0.13
 [1.0.12]: https://github.com/HumanGenome/WindrosePlus/releases/tag/v1.0.12
 [1.0.11]: https://github.com/HumanGenome/WindrosePlus/releases/tag/v1.0.11

@@ -1523,7 +1523,18 @@
             fetch("/api/mapinfo", {credentials: "same-origin"}).then(function(r) { return r.json(); }).then(function(mapInfo) {
                 if (mapInfo.error) {
                     seachartInitialized = false;
-                    document.getElementById('seachart-map').innerHTML = '<div style="display:flex;align-items:center;justify-content:center;height:100%;color:var(--text-muted);font-family:Cormorant Garamond,serif;font-size:1.2rem;">' + mapInfo.error + '</div>';
+                    var msg = mapInfo.error;
+                    if (mapInfo.generation) {
+                        if (mapInfo.generation.state === 'running') msg += ' Tile generation is currently running.';
+                        else if (mapInfo.generation.state === 'error') msg += ' Tile generation failed: ' + (mapInfo.generation.error || 'unknown error');
+                        else if (mapInfo.generation.state === 'complete') msg += ' Tile generation completed, but the map manifest is still missing.';
+                    }
+                    var holder = document.getElementById('seachart-map');
+                    holder.innerHTML = '';
+                    var notice = document.createElement('div');
+                    notice.style.cssText = 'display:flex;align-items:center;justify-content:center;height:100%;color:var(--text-muted);font-family:Cormorant Garamond,serif;font-size:1.2rem;text-align:center;padding:20px;';
+                    notice.textContent = msg;
+                    holder.appendChild(notice);
                     return;
                 }
                 seachartInitialized = true;

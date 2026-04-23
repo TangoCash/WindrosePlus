@@ -205,6 +205,25 @@ function Get-BuildInputHash {
         $chunks.Add([System.Text.Encoding]::UTF8.GetBytes("GAMEPAK_TICKS:$mtime`n"))
     }
 
+    $pakRoot = Join-Path $ServerDir "R5\Content\Paks"
+    foreach ($dir in @($pakRoot, (Join-Path $pakRoot "~mods"))) {
+        if (-not (Test-Path -LiteralPath $dir)) { continue }
+        $thirdPartyPaks = Get-ChildItem -LiteralPath $dir -Filter "*.pak" -File -ErrorAction SilentlyContinue | Where-Object {
+            $_.Name -notlike "pakchunk*-Windows*.pak" -and
+            $_.Name -notlike "pakchunk*-WindowsServer*.pak" -and
+            $_.Name -ne "WindrosePlus_Multipliers_P.pak" -and
+            $_.Name -ne "WindrosePlus_CurveTables_P.pak"
+        } | Sort-Object FullName
+
+        foreach ($pak in $thirdPartyPaks) {
+            $rel = $pak.FullName.Substring($ServerDir.Length).TrimStart("\", "/")
+            $chunks.Add([System.Text.Encoding]::UTF8.GetBytes("THIRD_PARTY_PAK:$($rel):$($pak.Length):$($pak.LastWriteTimeUtc.Ticks)`n"))
+        }
+    }
+
+    $allowPakConflicts = "$env:WINDROSEPLUS_ALLOW_PAK_CONFLICTS".ToLowerInvariant()
+    $chunks.Add([System.Text.Encoding]::UTF8.GetBytes("PAK_CONFLICT_OVERRIDE:$allowPakConflicts`n"))
+
     $versionFile = Join-Path $ScriptRoot "bin\VERSION.txt"
     if (Test-Path -LiteralPath $versionFile) {
         $v = [System.IO.File]::ReadAllText($versionFile).Trim()
@@ -339,7 +358,7 @@ if ($hasCT) {
         }
         Write-Host "  Extracting CurveTable assets with retoc..."
         New-Item -ItemType Directory -Force -Path $retocDir | Out-Null
-        $retocOutput = @(& $retocExe -a $aesKey to-legacy $utocPath $retocDir 2>&1)
+        $retocOutput = @(& $retocExe -a $aesKey to-legacy $paksDir $retocDir 2>&1)
         $retocExit = $LASTEXITCODE
 
         $extractedFiles = @(Get-ChildItem -Path $retocDir -Recurse -Filter "CT_*.uasset" -ErrorAction SilentlyContinue)

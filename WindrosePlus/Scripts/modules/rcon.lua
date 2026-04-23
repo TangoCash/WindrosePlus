@@ -25,6 +25,10 @@ Rcon._historyBuffer = {}     -- batched history entries
 Rcon._lastHistoryFlush = 0   -- last time buffer was flushed to disk
 Rcon._historyFlushInterval = 5  -- flush every 5 seconds
 Rcon._historyFlushSize = 10    -- or every 10 entries
+Rcon._lastHeartbeat = 0
+Rcon._heartbeatInterval = 5
+Rcon._lastErrorDetail = ""
+Rcon._lastErrorTs = 0
 
 function Rcon.init(gameDir, config, adminModule)
     Rcon._gameDir = gameDir
@@ -47,13 +51,16 @@ function Rcon.init(gameDir, config, adminModule)
     else
         Log.warn("RCON", "Spool directory not writable: " .. Rcon._spoolDir)
     end
+    Rcon._recoverProcessingIndex()
     Rcon._cleanStaleFiles()
+    Rcon._writeHeartbeat("starting", "RCON worker starting")
 
     -- Archive previous session's console history and start fresh
     Rcon._archiveAndResetHistory()
 
     Log.info("RCON", "Command processor started")
     Log.info("RCON", "Spool directory: " .. Rcon._spoolDir)
+    Rcon._writeHeartbeat("running", "ready")
 
     -- Poll at 2000ms (reduced from 500ms to cut idle CPU ~75%)
     -- Active mode: processes every 2s (os.time gate at 1s passes every wakeup)
@@ -66,7 +73,15 @@ function Rcon.init(gameDir, config, adminModule)
         end
         if now - Rcon._lastPoll >= interval then
             Rcon._lastPoll = now
-            pcall(Rcon._processCommands)
+            local ok, err = pcall(Rcon._processCommands)
+            if not ok then
+                local msg = tostring(err)
+                Log.warn("RCON", "Command processor error: " .. msg)
+                Rcon._writeHeartbeat("error", msg)
+            end
+        end
+        if now - Rcon._lastHeartbeat >= Rcon._heartbeatInterval then
+            Rcon._writeHeartbeat("running", "polling")
         end
         -- Flush buffered history entries periodically
         if #Rcon._historyBuffer > 0 and (now - Rcon._lastHistoryFlush >= Rcon._historyFlushInterval) then
@@ -77,6 +92,43 @@ function Rcon.init(gameDir, config, adminModule)
         end
         return false
     end)
+end
+
+function Rcon._writeHeartbeat(state, detail)
+    if not Rcon._gameDir or not Rcon._spoolDir then return end
+
+    if state == "error" then
+        Rcon._lastErrorDetail = detail or ""
+        Rcon._lastErrorTs = os.time()
+    end
+
+    local statusPath = Rcon._gameDir .. "windrose_plus_data\\rcon_status.json"
+    local tmpPath = statusPath .. ".tmp"
+    local payload = json.encode({
+        ts = os.time(),
+        version = WindrosePlus and WindrosePlus.VERSION or "?",
+        state = state or "running",
+        detail = detail or "",
+        last_error = Rcon._lastErrorDetail or "",
+        last_error_ts = Rcon._lastErrorTs or 0,
+        spool_dir = Rcon._spoolDir
+    })
+
+    local file = io.open(tmpPath, "w")
+    if not file then return end
+    file:write(payload)
+    file:close()
+
+    os.remove(statusPath)
+    if not os.rename(tmpPath, statusPath) then
+        os.remove(tmpPath)
+        local direct = io.open(statusPath, "w")
+        if direct then
+            direct:write(payload)
+            direct:close()
+        end
+    end
+    Rcon._lastHeartbeat = os.time()
 end
 
 function Rcon._archiveAndResetHistory()
@@ -110,24 +162,49 @@ function Rcon._archiveAndResetHistory()
 end
 
 function Rcon._cleanStaleFiles()
-    -- Clean stale response and command files by probing known ID patterns
+    -- Clean stale response files and incomplete temp command writes by probing known ID patterns.
+    -- Real cmd_*.json files are retryable work items and must not be deleted here.
     -- No io.popen('dir') needed — avoids CMD window flash
+    local prefixes = {"api_", "ps_", "web_", ""}
+    local now = os.time()
     for _, prefix in ipairs({"res_", "cmd_"}) do
-        -- Try common ID patterns: api_*, ps_*, numeric timestamps
-        -- Probe recent timestamps (last 60 seconds) and known source prefixes
-        local prefixes = {"api_", "ps_", "web_", ""}
-        local now = os.time()
         for _, idPrefix in ipairs(prefixes) do
             for t = now - 60, now do
-                -- Try timestamp-based IDs
                 local filename = prefix .. idPrefix .. t .. ".json"
-                os.remove(Rcon._spoolDir .. "\\" .. filename)
+                if prefix == "res_" then
+                    os.remove(Rcon._spoolDir .. "\\" .. filename)
+                end
+                os.remove(Rcon._spoolDir .. "\\" .. filename .. ".tmp")
             end
         end
-        -- Also try cleaning numbered IDs (0-9999)
         for i = 0, 20 do
-            os.remove(Rcon._spoolDir .. "\\" .. prefix .. i .. ".json")
+            local filename = prefix .. i .. ".json"
+            if prefix == "res_" then
+                os.remove(Rcon._spoolDir .. "\\" .. filename)
+            end
+            os.remove(Rcon._spoolDir .. "\\" .. filename .. ".tmp")
         end
+    end
+end
+
+function Rcon._recoverProcessingIndex()
+    local batchPath = Rcon._spoolDir .. "\\pending_commands.processing"
+    local file = io.open(batchPath, "r")
+    if not file then return end
+
+    local content = file:read("*a")
+    file:close()
+    os.remove(batchPath)
+
+    if not content or content == "" then return end
+
+    local indexPath = Rcon._spoolDir .. "\\pending_commands.txt"
+    local out = io.open(indexPath, "a")
+    if out then
+        out:write(content)
+        if content:sub(-1) ~= "\n" then out:write("\r\n") end
+        out:close()
+        Log.warn("RCON", "Recovered pending command index from previous session")
     end
 end
 
@@ -147,12 +224,18 @@ function Rcon._processCommands()
     if not renamed then return end
 
     local indexFile = io.open(batchPath, "r")
-    if not indexFile then return end
+    if not indexFile then
+        os.rename(batchPath, indexPath)
+        Rcon._writeHeartbeat("error", "Unable to read pending command batch")
+        return
+    end
     local content = indexFile:read("*a")
     indexFile:close()
-    os.remove(batchPath)
 
-    if not content or content == "" then return end
+    if not content or content == "" then
+        os.remove(batchPath)
+        return
+    end
 
     -- Strip UTF-8 BOM if present
     if content:sub(1, 3) == "\239\187\191" then content = content:sub(4) end
@@ -184,35 +267,70 @@ function Rcon._processCommands()
 
     -- Deduplicate and process
     local processed = {}
+    local processedCount = 0
+    local failed = {}
     for _, entry in ipairs(found) do
         if not processed[entry.path] then
             processed[entry.path] = true
-            Rcon._processFile(entry.path, entry.name)
+            local ok, err = pcall(Rcon._processFile, entry.path, entry.name)
+            if ok then
+                processedCount = processedCount + 1
+            else
+                local msg = tostring(err)
+                Log.warn("RCON", "Command failed before response: " .. entry.name .. " - " .. msg)
+                failed[#failed + 1] = entry.name
+            end
         end
+    end
+
+    if #failed > 0 then
+        local out = io.open(indexPath, "a")
+        if out then
+            for _, name in ipairs(failed) do
+                out:write(name .. "\r\n")
+            end
+            out:close()
+            os.remove(batchPath)
+        else
+            Rcon._writeHeartbeat("error", "processed " .. tostring(processedCount) .. " command(s); failed to requeue " .. tostring(#failed))
+            return
+        end
+        Rcon._writeHeartbeat("error", "processed " .. tostring(processedCount) .. " command(s); requeued " .. tostring(#failed))
+    else
+        os.remove(batchPath)
+        Rcon._writeHeartbeat("running", "processed " .. tostring(processedCount) .. " command(s)")
     end
 end
 
 function Rcon._processFile(filePath, filename)
+    local fileId = tostring((filename or ""):match("^cmd_(.+)%.json$") or "unknown"):gsub("[^%w_%-]", "")
+    if fileId == "" then fileId = "unknown" end
+
+    local function finishWithId(responseId, status, message, responseCommand, responseAdmin)
+        local okWrite, written = pcall(Rcon._writeResponse, responseId, status, message, responseCommand, responseAdmin)
+        if not okWrite then error(tostring(written)) end
+        if written == false then error("Unable to write response file") end
+        os.remove(filePath)
+    end
+
     local file = io.open(filePath, "r")
     if not file then return end
     local content = file:read("*a")
     file:close()
 
     if not content or content == "" then
-        os.remove(filePath)
+        finishWithId(fileId, "error", "Empty command file", nil, nil)
         return
     end
 
     local ok, data = pcall(json.decode, content)
     if not ok or type(data) ~= "table" then
-        local badId = content:match('"id"%s*:%s*"([^"]*)"') or "unknown"
-        Rcon._writeResponse(badId, "error", "Malformed JSON in command file")
-        os.remove(filePath)
+        local badId = (content:match('"id"%s*:%s*"([^"]*)"') or fileId):gsub("[^%w_%-]", "")
+        if badId == "" then badId = fileId end
+        finishWithId(badId, "error", "Malformed JSON in command file", nil, nil)
         Log.warn("RCON", "Malformed command: " .. filename)
         return
     end
-
-    os.remove(filePath)
 
     local rawId = tostring(data.id or "0")
     local id = rawId:gsub("[^%w_%-]", "")
@@ -223,25 +341,44 @@ function Rcon._processFile(filePath, filename)
     local password = data.password
     local adminUser = data.admin_user
 
+    local function finish(status, message, responseCommand, responseAdmin)
+        finishWithId(id, status, message, responseCommand, responseAdmin)
+    end
+
     if not command then
-        Rcon._writeResponse(id, "error", "Missing 'command' field")
+        finish("error", "Missing 'command' field", originalCommand, adminUser)
         return
     end
 
     if data.timestamp then
-        local age = os.time() - tonumber(data.timestamp)
+        local timestamp = tonumber(data.timestamp)
+        if not timestamp then
+            finish("error", "Invalid command timestamp", originalCommand, adminUser)
+            return
+        end
+        local age = os.time() - timestamp
         if age > Rcon._commandExpirySec then
-            Rcon._writeResponse(id, "error", "Command expired (" .. age .. "s old)", originalCommand, adminUser)
+            finish("error", "Command expired (" .. age .. "s old)", originalCommand, adminUser)
             return
         end
     end
 
     if Rcon._config and Rcon._config.reload then
-        Rcon._config.reload()
+        local okReload, reloadErr = pcall(Rcon._config.reload)
+        if not okReload then
+            finish("error", "Config reload failed: " .. tostring(reloadErr), originalCommand, adminUser)
+            return
+        end
     end
 
-    if password ~= Rcon._config.getRconPassword() then
-        Rcon._writeResponse(id, "error", "Authentication failed")
+    local okPassword, expectedPassword = pcall(Rcon._config.getRconPassword)
+    if not okPassword then
+        finish("error", "Config password read failed: " .. tostring(expectedPassword), originalCommand, adminUser)
+        return
+    end
+
+    if password ~= expectedPassword then
+        finish("error", "Authentication failed")
         Log.warn("RCON", "Auth failed: " .. command)
         return
     end
@@ -249,7 +386,7 @@ function Rcon._processFile(filePath, filename)
     Log.info("RCON", "Executing: " .. command)
 
     if not Rcon._admin then
-        Rcon._writeResponse(id, "error", "Admin module not loaded", originalCommand, adminUser)
+        finish("error", "Admin module not loaded", originalCommand, adminUser)
         return
     end
     if #args == 0 then
@@ -262,9 +399,9 @@ function Rcon._processFile(filePath, filename)
     end
     local ok, status, message = pcall(Rcon._admin.execute, command, args)
     if ok then
-        Rcon._writeResponse(id, status, message, originalCommand, adminUser)
+        finish(status, message, originalCommand, adminUser)
     else
-        Rcon._writeResponse(id, "error", tostring(status), originalCommand, adminUser)
+        finish("error", tostring(status), originalCommand, adminUser)
     end
 end
 
@@ -275,14 +412,32 @@ function Rcon._writeResponse(id, status, message, command, adminUser)
     local resPath = Rcon._spoolDir .. "\\res_" .. id .. ".json"
     local tmpPath = resPath .. ".tmp"
     local file = io.open(tmpPath, "w")
-    if not file then return end
-    file:write(response)
-    file:close()
-    os.rename(tmpPath, resPath)
+    if not file then return false end
+    local wrote = file:write(response)
+    if not wrote then
+        file:close()
+        os.remove(tmpPath)
+        return false
+    end
+    local closed = file:close()
+    if not closed then
+        os.remove(tmpPath)
+        return false
+    end
+    local renamed = os.rename(tmpPath, resPath)
+    if not renamed then
+        os.remove(resPath)
+        renamed = os.rename(tmpPath, resPath)
+    end
+    if not renamed then
+        os.remove(tmpPath)
+        return false
+    end
 
     if command and message ~= "Authentication failed" then
-        Rcon._appendConsoleHistory(command, status, message, adminUser)
+        pcall(Rcon._appendConsoleHistory, command, status, message, adminUser)
     end
+    return true
 end
 
 function Rcon._appendConsoleHistory(command, status, message, adminUser)

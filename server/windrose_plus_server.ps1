@@ -6,7 +6,7 @@ param(
     [string]$BindIp = ""
 )
 
-$Version = "1.0.13"
+$Version = "1.0.14"
 
 # Find game directory
 function Find-GameDir {
@@ -219,6 +219,7 @@ $tileGenTimer = New-Object System.Timers.Timer
 $tileGenTimer.Interval = 5000
 $tileGenTimer.AutoReset = $true
 $tileGenTrigger = Join-Path $dataDir "generate_tiles_trigger"
+$tileGenStatus = Join-Path $dataDir "map_generation_status.json"
 $tileGenScript = Join-Path $gameDir "windrose_plus\tools\generateTiles.ps1"
 if (-not (Test-Path -LiteralPath $tileGenScript)) { $tileGenScript = Join-Path $gameDir "tools\generateTiles.ps1" }
 Register-ObjectEvent $tileGenTimer Elapsed -Action {
@@ -227,11 +228,38 @@ Register-ObjectEvent $tileGenTimer Elapsed -Action {
         if (Test-Path -LiteralPath $tileGenScript) {
             Write-Host "Generating map tiles..."
             try {
-                & $tileGenScript -GameDir $gameDir
+                $started = [long][DateTimeOffset]::UtcNow.ToUnixTimeSeconds()
+                [System.IO.File]::WriteAllText($tileGenStatus, (@{
+                    state = "running"
+                    ts = $started
+                    script = $tileGenScript
+                } | ConvertTo-Json -Compress), [System.Text.UTF8Encoding]::new($false))
+                $output = (& $tileGenScript -GameDir $gameDir 2>&1 | Out-String).Trim()
+                [System.IO.File]::WriteAllText($tileGenStatus, (@{
+                    state = "complete"
+                    ts = [long][DateTimeOffset]::UtcNow.ToUnixTimeSeconds()
+                    started_ts = $started
+                    script = $tileGenScript
+                    output = $output
+                } | ConvertTo-Json -Depth 4 -Compress), [System.Text.UTF8Encoding]::new($false))
                 Write-Host "Map tiles generated."
             } catch {
-                Write-Host "Tile generation failed: $_"
+                $msg = $_.Exception.Message
+                [System.IO.File]::WriteAllText($tileGenStatus, (@{
+                    state = "error"
+                    ts = [long][DateTimeOffset]::UtcNow.ToUnixTimeSeconds()
+                    script = $tileGenScript
+                    error = $msg
+                } | ConvertTo-Json -Compress), [System.Text.UTF8Encoding]::new($false))
+                Write-Host "Tile generation failed: $msg"
             }
+        } else {
+            [System.IO.File]::WriteAllText($tileGenStatus, (@{
+                state = "error"
+                ts = [long][DateTimeOffset]::UtcNow.ToUnixTimeSeconds()
+                script = $tileGenScript
+                error = "generateTiles.ps1 not found"
+            } | ConvertTo-Json -Compress), [System.Text.UTF8Encoding]::new($false))
         }
     }
 } | Out-Null
@@ -247,6 +275,52 @@ function Send-Json($context, $data, $statusCode = 200) {
     $context.Response.ContentLength64 = $buffer.Length
     $context.Response.OutputStream.Write($buffer, 0, $buffer.Length)
     $context.Response.Close()
+}
+
+function Write-AtomicUtf8Json($path, $data) {
+    $tmpPath = "$path.tmp"
+    $json = $data | ConvertTo-Json -Depth 10 -Compress
+    [System.IO.File]::WriteAllText($tmpPath, $json, [System.Text.UTF8Encoding]::new($false))
+    if (Test-Path -LiteralPath $path) {
+        Remove-Item -LiteralPath $path -Force -ErrorAction SilentlyContinue
+    }
+    Move-Item -LiteralPath $tmpPath -Destination $path -Force
+}
+
+function Get-RconWorkerDiagnostic($spoolDir, $cmdPath) {
+    $statusPath = Join-Path $dataDir "rcon_status.json"
+    $now = [long][DateTimeOffset]::UtcNow.ToUnixTimeSeconds()
+    $status = $null
+    $age = $null
+
+    if (Test-Path -LiteralPath $statusPath) {
+        try {
+            $status = Get-Content -LiteralPath $statusPath -Raw | ConvertFrom-Json
+            if ($null -ne $status.ts) { $age = $now - [long]$status.ts }
+        } catch {
+            return "Command timed out (25s). RCON worker status exists but could not be parsed; restart the Windrose server."
+        }
+    } else {
+        return "Command timed out (25s). RCON worker status file is missing; the Windrose+ Lua worker is not running or RCON is disabled in the game process."
+    }
+
+    $detail = ""
+    if ($status.state -or $status.detail) {
+        $detail = " Worker state: $($status.state); detail: $($status.detail)"
+    }
+    if ($status.last_error) {
+        $detail += " Last worker error: $($status.last_error)"
+    }
+
+    if ($null -ne $age -and $age -gt 15) {
+        return "Command timed out (25s). RCON worker heartbeat is stale (${age}s old); restart the Windrose server process.$detail"
+    }
+
+    if (Test-Path -LiteralPath $cmdPath) {
+        return "Command timed out (25s). RCON worker is alive but did not consume the command file; check windrose_plus_data\\rcon and restart the Windrose server if it persists.$detail"
+    }
+
+    return "Command timed out (25s). RCON worker consumed the command but did not write a response.$detail"
 }
 
 function Send-Html($context, $html, $statusCode = 200) {
@@ -561,7 +635,15 @@ try {
                         $data = Get-Content $mapCoordsFile -Raw | ConvertFrom-Json
                         Send-Json $context $data
                     } else {
-                        Send-Json $context @{ error = "Map not ready yet. Join the server once to auto-generate the map." }
+                        $generation = $null
+                        $statusFile = Join-Path $dataDir "map_generation_status.json"
+                        if (Test-Path -LiteralPath $statusFile) {
+                            try { $generation = Get-Content $statusFile -Raw | ConvertFrom-Json } catch {}
+                        }
+                        Send-Json $context @{
+                            error = "Map not ready yet. Join the server once to auto-generate the map."
+                            generation = $generation
+                        }
                     }
                 }
                 "/api/rcon/log" {
@@ -611,8 +693,16 @@ try {
                     $cmdId = "ps_" + [long][DateTimeOffset]::UtcNow.ToUnixTimeSeconds() + "_" + (Get-Random -Maximum 999999)
                     $spoolDir = Join-Path $dataDir "rcon"
                     if (-not (Test-Path -LiteralPath $spoolDir)) { New-Item -ItemType Directory -Path $spoolDir -Force | Out-Null }
-                    $cmdData = @{ id = $cmdId; command = $body.command; args = @($body.args); password = $rconSecret; admin_user = "Dashboard" }
-                    $cmdData | ConvertTo-Json | Set-Content (Join-Path $spoolDir "cmd_$cmdId.json")
+                    $cmdData = @{
+                        id = $cmdId
+                        command = $body.command
+                        args = @($body.args)
+                        password = $rconSecret
+                        admin_user = "Dashboard"
+                        timestamp = [long][DateTimeOffset]::UtcNow.ToUnixTimeSeconds()
+                    }
+                    $cmdPath = Join-Path $spoolDir "cmd_$cmdId.json"
+                    Write-AtomicUtf8Json $cmdPath $cmdData
                     # Write index file so Lua mod can find the command without dir /b
                     [System.IO.File]::AppendAllText((Join-Path $spoolDir "pending_commands.txt"), "cmd_$cmdId.json`r`n")
 
@@ -629,8 +719,8 @@ try {
                         }
                     }
                     if (-not $result) {
-                        Remove-Item (Join-Path $spoolDir "cmd_$cmdId.json") -ErrorAction SilentlyContinue
-                        $result = @{ id = $cmdId; status = "error"; message = "Command timed out (25s)" }
+                        $message = Get-RconWorkerDiagnostic $spoolDir $cmdPath
+                        $result = @{ id = $cmdId; status = "error"; message = $message }
                     }
                     Send-Json $context $result
                 }

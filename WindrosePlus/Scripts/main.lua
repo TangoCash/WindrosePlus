@@ -3,7 +3,7 @@
 
 -- Global namespace — shared with all modules and third-party mods
 WindrosePlus = {
-    VERSION = "1.0.13",
+    VERSION = "1.0.14",
     state = {
         playerCount = 0,
         mode = "boot",           -- starts as "boot", transitions to "idle" or "active"
@@ -244,6 +244,7 @@ local function checkAndTriggerTileGen()
 
     -- Run tile generator (check tools/ first, then windrose_plus_http/ for alt deploy layouts)
     local candidates = {
+        gameDir .. "windrose_plus\\tools\\generateTiles.ps1",
         gameDir .. "tools\\generateTiles.ps1",
         gameDir .. "windrose_plus_http\\generateTiles.ps1",
     }

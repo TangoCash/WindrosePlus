@@ -23,10 +23,12 @@ $ErrorActionPreference = "Stop"
 $tileSize = 256
 $sw = [System.Diagnostics.Stopwatch]::StartNew()
 
-# Locate data
-$dataDir = Join-Path $GameDir "windrose_plus_data"
+# Locate data. Source export data may live beside the Win64 process on some
+# Wine/Docker layouts, but dashboard artifacts must stay in the root data dir.
+$dashboardDataDir = Join-Path $GameDir "windrose_plus_data"
+$dataDir = $dashboardDataDir
 if (-not $OutputDir) {
-    $OutputDir = Join-Path $dataDir "map_tiles"
+    $OutputDir = Join-Path $dashboardDataDir "map_tiles"
 }
 
 $terrainJson = Join-Path $dataDir "terrain_v17.json"
@@ -35,7 +37,7 @@ if (-not (Test-Path -LiteralPath $terrainJson)) {
     $terrainJson = Join-Path $altDataDir "terrain_v17.json"
     if (-not (Test-Path -LiteralPath $terrainJson)) {
         Write-Host "ERROR: terrain_v17.json not found" -ForegroundColor Red
-        exit 1
+        throw "terrain_v17.json not found"
     }
     $dataDir = $altDataDir
 }
@@ -43,7 +45,7 @@ if (-not (Test-Path -LiteralPath $terrainJson)) {
 $hfDir = Join-Path $dataDir "heightmaps"
 if (-not (Test-Path -LiteralPath $hfDir)) {
     Write-Host "ERROR: heightmaps/ directory not found" -ForegroundColor Red
-    exit 1
+    throw "heightmaps/ directory not found"
 }
 
 Write-Host "Loading terrain metadata..."
@@ -55,7 +57,7 @@ Write-Host "Components with heights: $($withH.Count)"
 
 if ($withH.Count -eq 0) {
     Write-Host "ERROR: No components with heightfield data" -ForegroundColor Red
-    exit 1
+    throw "No components with heightfield data"
 }
 
 # Calculate landscape steps
@@ -152,11 +154,12 @@ foreach ($c in $landComps) {
 }
 Write-Host "Indexed $($compIndex.Count) renderable components"
 
-# Compile C# tile renderer for native speed
+# Compile C# tile renderer and PNG writer for native speed. This avoids
+# System.Drawing so tile generation works on Linux/Docker PowerShell too.
 Add-Type -TypeDefinition @"
 using System;
-using System.Drawing;
-using System.Drawing.Imaging;
+using System.IO;
+using System.IO.Compression;
 using System.Runtime.InteropServices;
 
 public struct CompData {
@@ -167,66 +170,60 @@ public struct CompData {
 }
 
 public static class TileRenderer {
-    static byte[] oceanBGR = new byte[] { 65, 35, 20 };  // BGR
+    static byte[] oceanRGB = new byte[] { 20, 35, 65 };
 
     // Sea level is Z=0 in Windrose heightfield data (confirmed from terrain_v17.json)
     public static double SeaLevel = 0.0;
 
     public static void GetHeightColor(double h, byte[] buf) {
-        if (h < SeaLevel) { buf[0] = oceanBGR[0]; buf[1] = oceanBGR[1]; buf[2] = oceanBGR[2]; return; }
+        if (h < SeaLevel) { buf[0] = oceanRGB[0]; buf[1] = oceanRGB[1]; buf[2] = oceanRGB[2]; return; }
         double ah = h - SeaLevel;  // adjusted height above sea level
-        if (ah < 5) { buf[0] = 130; buf[1] = 170; buf[2] = 180; return; }  // beach
+        if (ah < 5) { buf[0] = 180; buf[1] = 170; buf[2] = 130; return; }  // beach
         double t;
         if (ah < 40) {
             t = ah / 40.0;
-            buf[0] = (byte)(100 - t * 50); buf[1] = (byte)(145 - t * 20); buf[2] = (byte)(130 - t * 60);
+            buf[0] = (byte)(130 - t * 60); buf[1] = (byte)(145 - t * 20); buf[2] = (byte)(100 - t * 50);
             return;
         }
         if (ah < 120) {
             t = (ah - 40) / 80.0;
-            buf[0] = (byte)(50 + t * 5); buf[1] = (byte)(125 - t * 15); buf[2] = (byte)(70 - t * 10);
+            buf[0] = (byte)(70 - t * 10); buf[1] = (byte)(125 - t * 15); buf[2] = (byte)(50 + t * 5);
             return;
         }
         if (ah < 300) {
             t = (ah - 120) / 180.0;
-            buf[0] = (byte)(55 + t * 5); buf[1] = (byte)(110 - t * 10); buf[2] = (byte)(60 + t * 15);
+            buf[0] = (byte)(60 + t * 15); buf[1] = (byte)(110 - t * 10); buf[2] = (byte)(55 + t * 5);
             return;
         }
         if (ah < 600) {
             t = (ah - 300) / 300.0;
-            buf[0] = (byte)(60 + t * 5); buf[1] = (byte)(100 - t * 5); buf[2] = (byte)(75 + t * 25);
+            buf[0] = (byte)(75 + t * 25); buf[1] = (byte)(100 - t * 5); buf[2] = (byte)(60 + t * 5);
             return;
         }
         if (ah < 1000) {
             t = (ah - 600) / 400.0;
-            buf[0] = (byte)(65 + t * 10); buf[1] = (byte)(95 + t * 5); buf[2] = (byte)(100 + t * 20);
+            buf[0] = (byte)(100 + t * 20); buf[1] = (byte)(95 + t * 5); buf[2] = (byte)(65 + t * 10);
             return;
         }
         if (ah < 2000) {
             t = (ah - 1000) / 1000.0;
-            buf[0] = (byte)(75 + t * 15); buf[1] = (byte)(100 + t * 15); buf[2] = (byte)(120 + t * 20);
+            buf[0] = (byte)(120 + t * 20); buf[1] = (byte)(100 + t * 15); buf[2] = (byte)(75 + t * 15);
             return;
         }
-        buf[0] = 95; buf[1] = 120; buf[2] = 145;  // peak
+        buf[0] = 145; buf[1] = 120; buf[2] = 95;  // peak
     }
 
-    public static Bitmap RenderTile(int tileSize, double tileWx, double tileWy,
-                                     double tileWorldSize, CompData[] comps) {
-        var bmp = new Bitmap(tileSize, tileSize, PixelFormat.Format24bppRgb);
-        var rect = new Rectangle(0, 0, tileSize, tileSize);
-        var bmpData = bmp.LockBits(rect, ImageLockMode.WriteOnly, PixelFormat.Format24bppRgb);
-        int stride = bmpData.Stride;
-        byte[] pixels = new byte[stride * tileSize];
-
-        // Fill with ocean
-        for (int y = 0; y < tileSize; y++) {
-            for (int x = 0; x < tileSize; x++) {
-                int idx = y * stride + x * 3;
-                pixels[idx] = oceanBGR[0];
-                pixels[idx + 1] = oceanBGR[1];
-                pixels[idx + 2] = oceanBGR[2];
-            }
+    public static byte[] RenderSolidTile(int tileSize, byte r, byte g, byte b) {
+        byte[] pixels = new byte[tileSize * tileSize * 3];
+        for (int i = 0; i < pixels.Length; i += 3) {
+            pixels[i] = r; pixels[i + 1] = g; pixels[i + 2] = b;
         }
+        return pixels;
+    }
+
+    public static byte[] RenderTile(int tileSize, double tileWx, double tileWy,
+                                     double tileWorldSize, CompData[] comps) {
+        byte[] pixels = RenderSolidTile(tileSize, oceanRGB[0], oceanRGB[1], oceanRGB[2]);
 
         double pixelSize = tileWorldSize / tileSize;
         byte[] color = new byte[3];
@@ -263,7 +260,7 @@ public static class TileRenderer {
                     double worldH = c.minZ + raw * (c.rng / 65535.0);
 
                     GetHeightColor(worldH, color);
-                    int pidx = py * stride + px * 3;
+                    int pidx = (py * tileSize + px) * 3;
                     pixels[pidx] = color[0];
                     pixels[pidx + 1] = color[1];
                     pixels[pidx + 2] = color[2];
@@ -271,12 +268,108 @@ public static class TileRenderer {
             }
         }
 
-        Marshal.Copy(pixels, 0, bmpData.Scan0, pixels.Length);
-        bmp.UnlockBits(bmpData);
-        return bmp;
+        return pixels;
     }
 }
-"@ -ReferencedAssemblies System.Drawing
+
+public static class PngWriter {
+    static readonly byte[] Signature = new byte[] { 137, 80, 78, 71, 13, 10, 26, 10 };
+    static readonly uint[] CrcTable = BuildCrcTable();
+
+    public static void SaveRgb(string path, int width, int height, byte[] rgb) {
+        byte[] scanlines = new byte[(width * 3 + 1) * height];
+        int src = 0, dst = 0;
+        for (int y = 0; y < height; y++) {
+            scanlines[dst++] = 0; // filter type: none
+            Buffer.BlockCopy(rgb, src, scanlines, dst, width * 3);
+            src += width * 3;
+            dst += width * 3;
+        }
+
+        using (var fs = new FileStream(path, FileMode.Create, FileAccess.Write, FileShare.None)) {
+            fs.Write(Signature, 0, Signature.Length);
+
+            byte[] ihdr = new byte[13];
+            WriteUInt32BE(ihdr, 0, (uint)width);
+            WriteUInt32BE(ihdr, 4, (uint)height);
+            ihdr[8] = 8;  // bit depth
+            ihdr[9] = 2;  // truecolor RGB
+            ihdr[10] = 0; ihdr[11] = 0; ihdr[12] = 0;
+            WriteChunk(fs, "IHDR", ihdr);
+            WriteChunk(fs, "IDAT", ZlibCompress(scanlines));
+            WriteChunk(fs, "IEND", new byte[0]);
+        }
+    }
+
+    static byte[] ZlibCompress(byte[] data) {
+        using (var ms = new MemoryStream()) {
+            ms.WriteByte(0x78);
+            ms.WriteByte(0x9C);
+            using (var ds = new DeflateStream(ms, CompressionLevel.Optimal, true)) {
+                ds.Write(data, 0, data.Length);
+            }
+            uint adler = Adler32(data);
+            WriteUInt32BE(ms, adler);
+            return ms.ToArray();
+        }
+    }
+
+    static uint Adler32(byte[] data) {
+        const uint Mod = 65521;
+        uint a = 1, b = 0;
+        foreach (byte value in data) {
+            a = (a + value) % Mod;
+            b = (b + a) % Mod;
+        }
+        return (b << 16) | a;
+    }
+
+    static void WriteChunk(Stream stream, string type, byte[] data) {
+        byte[] typeBytes = System.Text.Encoding.ASCII.GetBytes(type);
+        WriteUInt32BE(stream, (uint)data.Length);
+        stream.Write(typeBytes, 0, typeBytes.Length);
+        stream.Write(data, 0, data.Length);
+
+        uint crc = 0xFFFFFFFF;
+        crc = UpdateCrc(crc, typeBytes);
+        crc = UpdateCrc(crc, data);
+        WriteUInt32BE(stream, crc ^ 0xFFFFFFFF);
+    }
+
+    static uint[] BuildCrcTable() {
+        uint[] table = new uint[256];
+        for (uint n = 0; n < table.Length; n++) {
+            uint c = n;
+            for (int k = 0; k < 8; k++) {
+                c = ((c & 1) != 0) ? (0xEDB88320 ^ (c >> 1)) : (c >> 1);
+            }
+            table[n] = c;
+        }
+        return table;
+    }
+
+    static uint UpdateCrc(uint crc, byte[] data) {
+        uint c = crc;
+        foreach (byte b in data) {
+            c = CrcTable[(c ^ b) & 0xFF] ^ (c >> 8);
+        }
+        return c;
+    }
+
+    static void WriteUInt32BE(Stream stream, uint value) {
+        byte[] buf = new byte[4];
+        WriteUInt32BE(buf, 0, value);
+        stream.Write(buf, 0, 4);
+    }
+
+    static void WriteUInt32BE(byte[] buf, int offset, uint value) {
+        buf[offset] = (byte)(value >> 24);
+        buf[offset + 1] = (byte)(value >> 16);
+        buf[offset + 2] = (byte)(value >> 8);
+        buf[offset + 3] = (byte)value;
+    }
+}
+"@
 
 # Build CompData array for C#
 Write-Host "Building render data..."
@@ -318,18 +411,12 @@ for ($zoom = 0; $zoom -le $MaxZoom; $zoom++) {
             }
 
             if (-not $hasOverlap) {
-                # Pure ocean tile — write a small ocean-only tile
-                $oceanBmp = New-Object System.Drawing.Bitmap($tileSize, $tileSize)
-                $gfx = [System.Drawing.Graphics]::FromImage($oceanBmp)
-                $brush = New-Object System.Drawing.SolidBrush([System.Drawing.Color]::FromArgb(20, 35, 65))
-                $gfx.FillRectangle($brush, 0, 0, $tileSize, $tileSize)
-                $gfx.Dispose(); $brush.Dispose()
-                $oceanBmp.Save((Join-Path $zoomDir "${col}-${row}.png"), [System.Drawing.Imaging.ImageFormat]::Png)
-                $oceanBmp.Dispose()
+                # Pure ocean tile.
+                $pixels = [TileRenderer]::RenderSolidTile($tileSize, 20, 35, 65)
+                [PngWriter]::SaveRgb((Join-Path $zoomDir "${col}-${row}.png"), $tileSize, $tileSize, $pixels)
             } else {
-                $tile = [TileRenderer]::RenderTile($tileSize, $tileWx, $tileWy, $tileWorldSize, $csharpComps)
-                $tile.Save((Join-Path $zoomDir "${col}-${row}.png"), [System.Drawing.Imaging.ImageFormat]::Png)
-                $tile.Dispose()
+                $pixels = [TileRenderer]::RenderTile($tileSize, $tileWx, $tileWy, $tileWorldSize, $csharpComps)
+                [PngWriter]::SaveRgb((Join-Path $zoomDir "${col}-${row}.png"), $tileSize, $tileSize, $pixels)
             }
             $zoomTiles++
         }
@@ -367,7 +454,7 @@ $mapCoords = @{
         max_x = $ibMaxX; max_y = $ibMaxY
     }
 }
-$coordsPath = Join-Path $dataDir "map_coords.json"
+$coordsPath = Join-Path $dashboardDataDir "map_coords.json"
 [System.IO.File]::WriteAllText($coordsPath, ($mapCoords | ConvertTo-Json -Depth 3))
 
 Write-Host ""

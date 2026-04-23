@@ -44,7 +44,7 @@ Windrose dedicated servers don't respond to standard server queries, so your ser
   "server": {
     "name": "My Windrose Server",
     "version": "0.10.0.1.6",
-    "windrose_plus": "1.0.13",
+    "windrose_plus": "1.0.14",
     "password_protected": false,
     "max_players": 10,
     "player_count": 3
@@ -65,7 +65,7 @@ Adjust XP, loot, crafting costs, crop speed, cooking/smelting speed, harvest yie
 
 > **Note on `stack_size` and `points_per_level`:** `stack_size` patches the server PAK but has no effect on vanilla clients — `MaxCountInSlot` is enforced client-side, so the knob only works if every connected client loads a matching PAK ([#17](https://github.com/HumanGenome/WindrosePlus/issues/17)). `points_per_level` is disabled as of v1.0.8 because it crashes the server on character login ([#20](https://github.com/HumanGenome/WindrosePlus/issues/20)); use `wp.givestats` instead to grant extra points.
 
-> **Save-safety warning:** `inventory_size`, `stack_size`, `weight`, and other inventory-affecting PAK edits can become part of player save state once a character logs in and saves. Take an out-of-band save backup before enabling them, and do not combine Windrose+ PAK overrides with other PAK mods that edit the same inventory/stack assets unless you are ready to restore from backup.
+> **Save-safety warning:** `inventory_size`, `stack_size`, `weight`, and other inventory-affecting PAK edits can become part of player save state once a character logs in and saves. Take an out-of-band save backup before enabling them. Windrose+ now refuses to build these high-risk multiplier PAKs when another installed PAK also edits inventory assets, and removes the existing generated multiplier PAK on that failure, unless an advanced admin deliberately sets `WINDROSEPLUS_ALLOW_PAK_CONFLICTS=1`.
 
 **Multipliers** (`windrose_plus.json`):
 ```json
@@ -294,7 +294,8 @@ See [docs/scripting-guide.md](docs/scripting-guide.md) for the API and examples.
 - **Server crashes on startup** - Check `UE4SS-settings.ini`. Only `HookProcessInternal` and `HookEngineTick` should be enabled.
 - **RCON not working** - Set a real password in `windrose_plus.json` (not blank, not `changeme`).
 - **Dashboard commands time out except `wp.help`** - Fully stop the game process and dashboard, then start them again. If you launched with `StartWindrosePlusServer.bat`, closing the console window can leave `WindroseServer-Win64-Shipping.exe` running in the background; stop it in Task Manager before relaunching.
-- **No map data** - A player needs to connect at least once to trigger terrain export.
+- **No map data** - A player needs to connect at least once to trigger terrain export. If the Sea Chart still says "not ready", check `windrose_plus_data\map_generation_status.json`; it records whether tile generation is running, complete, or failed.
+- **CurveTable PAK fails with a retoc error** - Run `windrose_plus\tools\WindrosePlus-BuildPak.ps1 -ForceExtract` once so the cache is rebuilt and the full retoc error is shown. If the message mentions `ScriptObjects`, make sure you are on v1.0.14 or newer; older builds passed only one `.utoc` file to retoc instead of the full `R5\Content\Paks` folder.
 - **Fully disable Windrose+ for recovery testing** - Stop the server, rename `R5\Binaries\Win64\dwmapi.dll`, delete or move `R5\Content\Paks\WindrosePlus_Multipliers_P.pak` and `R5\Content\Paks\WindrosePlus_CurveTables_P.pak`, then delete `R5\Content\Paks\.windroseplus_build.hash`. Removing settings from `windrose_plus.json` is not enough because UE4SS and existing PAK overrides can still load.
 - **Recovering from inventory/stack save issues** - Restore a save backup from before the inventory-affecting PAK change, fully disable Windrose+ as above, then confirm the character can join before re-enabling any PAK overrides.
 

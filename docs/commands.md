@@ -489,7 +489,7 @@ Heightmap exported: 4 landscapes, 16384 vertices
 
 ### wp.mapexport
 
-Trigger the C++ HeightmapExporter mod to export raw terrain heightfield data. This writes binary `.bin` files to `windrose_plus_data/heightmaps/` which are then processed into map tiles by `tools/generateTiles.ps1`.
+Trigger the C++ HeightmapExporter mod to export raw terrain heightfield data. This writes binary `.bin` files to `windrose_plus_data/heightmaps/` which are then processed into map tiles by `windrose_plus/tools/generateTiles.ps1`.
 
 ```
 Usage: wp.mapexport

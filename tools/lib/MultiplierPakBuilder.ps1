@@ -78,6 +78,94 @@ function Invoke-RepakList {
     return $files
 }
 
+function Get-WindrosePlusThirdPartyPaks {
+    param([string]$ServerDir = "")
+
+    $pakRoot = if ($ServerDir) {
+        Join-Path $ServerDir "R5\Content\Paks"
+    } else {
+        Join-Path "." "R5\Content\Paks"
+    }
+
+    $pakDirs = @($pakRoot, (Join-Path $pakRoot "~mods"))
+    $paks = @()
+
+    foreach ($dir in $pakDirs) {
+        if (-not (Test-Path -LiteralPath $dir)) { continue }
+        $paks += Get-ChildItem -LiteralPath $dir -Filter "*.pak" -File -ErrorAction SilentlyContinue | Where-Object {
+            $name = $_.Name
+            $name -notlike "pakchunk*-Windows*.pak" -and
+            $name -notlike "pakchunk*-WindowsServer*.pak" -and
+            $name -ne "WindrosePlus_Multipliers_P.pak" -and
+            $name -ne "WindrosePlus_CurveTables_P.pak"
+        }
+    }
+
+    return @($paks)
+}
+
+function Test-WindrosePlusPakConflicts {
+    param(
+        [string]$Repak,
+        [string]$AesKey,
+        [string]$ServerDir = "",
+        [string[]]$Needles
+    )
+
+    $allow = "$env:WINDROSEPLUS_ALLOW_PAK_CONFLICTS".ToLowerInvariant()
+    if ($allow -in @("1", "true", "yes", "on")) { return @() }
+
+    $paks = @(Get-WindrosePlusThirdPartyPaks -ServerDir $ServerDir)
+    if ($paks.Count -eq 0) { return @() }
+
+    $conflicts = @()
+    foreach ($pakFile in $paks) {
+        $raw = & $Repak --aes-key $AesKey list $pakFile.FullName 2>&1
+        $listExit = $LASTEXITCODE
+        if ($listExit -ne 0) {
+            $raw = & $Repak list $pakFile.FullName 2>&1
+            $listExit = $LASTEXITCODE
+        }
+
+        if ($listExit -ne 0) {
+            $message = ($raw | Out-String).Trim()
+            if ($message.Length -gt 140) { $message = $message.Substring(0, 140) + "..." }
+            $conflicts += [pscustomobject]@{
+                Pak = $pakFile.Name
+                Asset = "unable to inspect PAK contents ($message)"
+            }
+            continue
+        }
+
+        $seenForPak = 0
+        foreach ($line in (($raw | Out-String).Split("`n"))) {
+            $asset = $line.Trim()
+            if (-not $asset) { continue }
+
+            foreach ($needle in $Needles) {
+                if ($asset.IndexOf($needle, [System.StringComparison]::OrdinalIgnoreCase) -ge 0) {
+                    $conflicts += [pscustomobject]@{
+                        Pak = $pakFile.Name
+                        Asset = $asset
+                    }
+                    $seenForPak++
+                    break
+                }
+            }
+
+            if ($seenForPak -ge 5) {
+                $conflicts += [pscustomobject]@{
+                    Pak = $pakFile.Name
+                    Asset = "additional matching assets omitted"
+                }
+                break
+            }
+        }
+    }
+
+    return @($conflicts)
+}
+
 function Build-MultiplierPak {
     <#
     .SYNOPSIS
@@ -160,6 +248,48 @@ function Build-MultiplierPak {
     if ($allDefault) {
         $result.Error = "All multipliers are 1.0 (default). Nothing to build."
         return $result
+    }
+
+    $outPakPath = if ($ServerDir) {
+        Join-Path $ServerDir "R5\Content\Paks\$OutputPak"
+    } else {
+        $OutputPak
+    }
+
+    $riskMultipliers = @()
+    if ($stackSize -ne 1.0) { $riskMultipliers += "stack_size" }
+    if ($weight -ne 1.0) { $riskMultipliers += "weight" }
+    if ($invSize -ne 1.0) { $riskMultipliers += "inventory_size" }
+
+    if ($riskMultipliers.Count -gt 0) {
+        $allow = "$env:WINDROSEPLUS_ALLOW_PAK_CONFLICTS".ToLowerInvariant()
+        if ($allow -in @("1", "true", "yes", "on")) {
+            Write-Warning "Skipping third-party PAK conflict check because WINDROSEPLUS_ALLOW_PAK_CONFLICTS is set."
+        } else {
+            Write-Host "  Checking existing PAK mods for inventory/save conflicts..."
+            $conflicts = @(Test-WindrosePlusPakConflicts `
+                -Repak $repak `
+                -AesKey $AesKey `
+                -ServerDir $ServerDir `
+                -Needles @("InventoryItems/", "/Inventory", "Inventory/"))
+
+            if ($conflicts.Count -gt 0) {
+                $sample = $conflicts | Select-Object -First 8 | ForEach-Object { "$($_.Pak): $($_.Asset)" }
+                $more = if ($conflicts.Count -gt 8) { " (+$($conflicts.Count - 8) more)" } else { "" }
+                $staleNote = ""
+                if (Test-Path -LiteralPath $outPakPath) {
+                    try {
+                        Remove-Item -LiteralPath $outPakPath -Force -ErrorAction Stop
+                        $staleNote = " Existing $OutputPak was removed so a stale high-risk override cannot load after this failure."
+                    } catch {
+                        $staleNote = " Existing $OutputPak could not be removed automatically: $($_.Exception.Message). Delete it manually before launching the server."
+                    }
+                }
+                $result.OutputPath = $outPakPath
+                $result.Error = "Refusing to build high-risk multiplier PAK because $($riskMultipliers -join ', ') changes inventory/save-affecting assets and existing PAK mod(s) also touch inventory assets: $($sample -join '; ')$more. Remove the conflicting PAK(s), rebuild, and restore a pre-change save backup if affected players already joined.$staleNote Advanced admins can set WINDROSEPLUS_ALLOW_PAK_CONFLICTS=1 to override after testing the exact PAK combination."
+                return $result
+            }
+        }
     }
 
     $tmpDir = Join-Path ([System.IO.Path]::GetTempPath()) "WindrosePlus_pak_$(Get-Random)"
@@ -419,12 +549,6 @@ function Build-MultiplierPak {
                 }
             }
             Write-Host "    Modified $harvMod resource spawners"
-        }
-
-        $outPakPath = if ($ServerDir) {
-            Join-Path $ServerDir "R5\Content\Paks\$OutputPak"
-        } else {
-            $OutputPak
         }
 
         if ($modifiedCount -eq 0) {
