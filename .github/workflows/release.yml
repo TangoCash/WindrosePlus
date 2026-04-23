@@ -12,40 +12,8 @@ permissions:
   contents: write
 
 jobs:
-  build-idle-cpu-limiter:
-    runs-on: windows-latest
-
-    steps:
-      - name: Checkout
-        uses: actions/checkout@v4
-
-      - name: Fetch UE4SS SDK
-        shell: pwsh
-        run: |
-          # UE4SS declares its submodules with ssh:// URLs; rewrite to https:// so the CI runner (no SSH key) can clone them.
-          git config --global url."https://github.com/".insteadOf "git@github.com:"
-          git clone --depth 1 --recurse-submodules --shallow-submodules https://github.com/UE4SS-RE/RE-UE4SS.git cpp-mods/RE-UE4SS
-
-      - name: Build IdleCpuLimiter
-        shell: pwsh
-        run: |
-          cmake -B cpp-mods/build -S cpp-mods -G "Visual Studio 17 2022" -A x64
-          cmake --build cpp-mods/build --config Game__Shipping__Win64 --target IdleCpuLimiter
-          Copy-Item cpp-mods/build/IdleCpuLimiter/Game__Shipping__Win64/IdleCpuLimiter.dll cpp-mods/IdleCpuLimiter/IdleCpuLimiter.dll -Force
-          if (-not (Test-Path cpp-mods/IdleCpuLimiter/IdleCpuLimiter.dll)) {
-            throw "IdleCpuLimiter.dll was not built"
-          }
-
-      - name: Upload IdleCpuLimiter artifact
-        uses: actions/upload-artifact@v4
-        with:
-          name: IdleCpuLimiter
-          path: cpp-mods/IdleCpuLimiter/IdleCpuLimiter.dll
-          if-no-files-found: error
-
   build-and-release:
     runs-on: ubuntu-latest
-    needs: build-idle-cpu-limiter
 
     env:
       # Pinned tool versions. Bump here (and rerun the release tag) to upgrade.
@@ -94,27 +62,18 @@ jobs:
           curl -fsSL "https://raw.githubusercontent.com/trumank/repak/v${REPAK_VERSION}/LICENSE-APACHE" -o tools/bin/LICENSE-repak-APACHE.txt || true
           curl -fsSL "https://raw.githubusercontent.com/trumank/retoc/v${RETOC_VERSION}/LICENSE"        -o tools/bin/LICENSE-retoc.txt       || true
 
-      - name: Fetch HeightmapExporter.dll from v1.0.0 release
-        # cpp-mods/HeightmapExporter ships as source (dllmain.cpp + CMakeLists.txt).
-        # The compiled DLL lives as a standalone asset on the v1.0.0 release.
-        # Rebuild it in a CI job only if/when we need a new version; for now pull
-        # the already-shipped binary so fresh installs still get heightmap export.
+      - name: Fetch prebuilt C++ mod DLLs
+        # C++ mods (HeightmapExporter, IdleCpuLimiter) ship as source in-repo but
+        # build against the UE4SS SDK, which pulls a submodule gated behind Epic's
+        # licensed GitHub org — a public CI runner can't clone it. Prebuilt DLLs
+        # are attached to prior releases as standalone assets and fetched here.
+        # Rebuild locally on a Windows dev env with UE4SS access if/when a new
+        # version is needed, upload the DLL as a release asset, then bump the tag.
         run: |
           mkdir -p cpp-mods/HeightmapExporter
           curl -fsSL "https://github.com/humangenome/WindrosePlus/releases/download/v1.0.0/HeightmapExporter.dll" \
             -o cpp-mods/HeightmapExporter/HeightmapExporter.dll
           test -s cpp-mods/HeightmapExporter/HeightmapExporter.dll
-
-      - name: Download IdleCpuLimiter.dll
-        uses: actions/download-artifact@v4
-        with:
-          name: IdleCpuLimiter
-          path: cpp-mods/IdleCpuLimiter
-
-      - name: Verify C++ mod DLLs
-        run: |
-          test -s cpp-mods/HeightmapExporter/HeightmapExporter.dll
-          test -s cpp-mods/IdleCpuLimiter/IdleCpuLimiter.dll
 
       - name: Extract release notes from CHANGELOG
         id: notes
@@ -174,5 +133,4 @@ jobs:
             --title "Windrose+ $TAG" \
             --notes-file release_notes.md \
             WindrosePlus.zip \
-            cpp-mods/HeightmapExporter/HeightmapExporter.dll \
-            cpp-mods/IdleCpuLimiter/IdleCpuLimiter.dll
+            cpp-mods/HeightmapExporter/HeightmapExporter.dll
