@@ -357,37 +357,15 @@ function Build-MultiplierPak {
             }
         }
 
-        # Stack sizes and weight
+        # stack_size and weight patching intentionally disabled (v1.0.14).
+        # Multiple live production servers with non-default stack_size (or stack+inv) crashed
+        # repeatedly with the same R5BLBusinessRule.h:374 "Inventory.Module.Default" data-
+        # inconsistency signature as the previously-disabled points_per_level path. Even the
+        # narrower `MaxCountInSlot > 1` guard (originally issue #3) did not prevent the engine's
+        # inventory-module validator from rejecting stacked state at runtime. No safe patch
+        # path found until the validator is understood or relaxed.
         if ($stackSize -ne 1.0 -or $weight -ne 1.0) {
-            Write-Host "  Modifying inventory items (stack=${stackSize}x, weight=${weight}x)..."
-            $itemFiles = Invoke-RepakList -Repak $repak -AesKey $AesKey -PakPath $pak -Filter "InventoryItems/"
-            $itemMod = 0
-            foreach ($item in $itemFiles) {
-                $json = Invoke-RepakGet -Repak $repak -AesKey $AesKey -PakPath $pak -FilePath $item.Trim()
-                if (-not $json) { continue }
-                $data = $json | ConvertFrom-Json
-                if (-not $data.InventoryItemGppData) { continue }
-                $gpp = $data.InventoryItemGppData
-                $changed = $false
-                # Skip items with original stack=1 — those are explicitly unstackable
-                # (gear, jewelry, ship cannons, lore notes). Multiplying turns them stackable (issue #3).
-                if ($stackSize -ne 1.0 -and $gpp.MaxCountInSlot -and $gpp.MaxCountInSlot -gt 1) {
-                    $gpp.MaxCountInSlot = [Math]::Max(1, [int]($gpp.MaxCountInSlot * $stackSize))
-                    $changed = $true
-                }
-                if ($weight -ne 1.0 -and $gpp.Weight -and $gpp.Weight -gt 0) {
-                    $gpp.Weight = [Math]::Round($gpp.Weight * $weight, 4)
-                    $changed = $true
-                }
-                if ($changed) {
-                    $outPath = Join-Path $tmpDir $item.Trim()
-                    New-Item -ItemType Directory -Force -Path (Split-Path $outPath) | Out-Null
-                    [System.IO.File]::WriteAllText($outPath, ($data | ConvertTo-Json -Depth 10), [System.Text.UTF8Encoding]::new($false))
-                    $modifiedCount++
-                    $itemMod++
-                }
-            }
-            Write-Host "    Modified $itemMod items"
+            Write-Host "  Skipping stack_size/weight (disabled due to engine inventory validator crash)"
         }
 
         # Crafting costs
@@ -418,38 +396,16 @@ function Build-MultiplierPak {
             Write-Host "    Modified $recipeMod recipes"
         }
 
-        # Inventory slot counts
+        # inventory_size patching intentionally disabled (v1.0.14).
+        # Inflated CountSlots/MaxSlots on inventory components triggers the same
+        # R5BLBusinessRule.h:374 "Inventory.Module.Default" validator crash documented for
+        # stack_size above. Additionally: slot counts bake into character saves (time-bomb
+        # property) — once a character has allocated beyond vanilla bounds, lowering inv_size
+        # makes the save fail vanilla validation and the server refuses to load the character.
+        # Keep disabled until a validator-aware patch path exists AND a character sanitizer
+        # can safely restore save files after a rollback.
         if ($invSize -ne 1.0) {
-            Write-Host "  Modifying inventory slot counts (${invSize}x)..."
-            $slotFields = @('CountSlots', 'MaxSlots', 'InventorySize', 'SlotCount')
-            # "Character" filter scanned 877 files but matched zero with slot fields — dropped.
-            $invFiles = Invoke-RepakList -Repak $repak -AesKey $AesKey -PakPath $pak -Filter "Inventory"
-            $invMod = 0
-            foreach ($if in $invFiles) {
-                $fname = $if.Trim()
-                $json = Invoke-RepakGet -Repak $repak -AesKey $AesKey -PakPath $pak -FilePath $fname
-                if (-not $json) { continue }
-                $data = $json | ConvertFrom-Json
-                $changed = $false
-                foreach ($field in $slotFields) {
-                    if ($null -ne $data.$field -and [int]$data.$field -gt 0) {
-                        $data.$field = [Math]::Max(1, [int]([int]$data.$field * $invSize))
-                        $changed = $true
-                    }
-                    if ($data.InventoryComponent -and $null -ne $data.InventoryComponent.$field -and [int]$data.InventoryComponent.$field -gt 0) {
-                        $data.InventoryComponent.$field = [Math]::Max(1, [int]([int]$data.InventoryComponent.$field * $invSize))
-                        $changed = $true
-                    }
-                }
-                if ($changed) {
-                    $outPath = Join-Path $tmpDir $fname
-                    New-Item -ItemType Directory -Force -Path (Split-Path $outPath) | Out-Null
-                    [System.IO.File]::WriteAllText($outPath, ($data | ConvertTo-Json -Depth 10), [System.Text.UTF8Encoding]::new($false))
-                    $modifiedCount++
-                    $invMod++
-                }
-            }
-            Write-Host "    Modified $invMod inventory configs"
+            Write-Host "  Skipping inventory_size (disabled due to engine validator crash + character-save time-bomb)"
         }
 
         # points_per_level patching intentionally disabled.

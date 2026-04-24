@@ -6,6 +6,10 @@
 
 - **Out-of-process Idle CPU Limiter release agent (`tools/WindrosePlusLimiterAgent.ps1`).** Watches inbound TCP connections on the game port and toggles the DLL's disable sentinel so the cap is lifted before a connecting client times out. The agent runs at normal priority outside the capped job, eliminating the race where the DLL's in-process release checks are themselves throttled to the idle rate. Opt-in: launch manually alongside the server or wire into your own start script.
 
+### Changed
+
+- **Disabled `stack_size`, `weight`, and `inventory_size` multiplier PAK patching.** Production servers with any of these three multipliers crashed repeatedly with the same `R5BLBusinessRule.h:374` "Inventory.Module.Default" validator crash signature as the previously-disabled `points_per_level` path. Even the narrow `MaxCountInSlot > 1` guard for stack_size (issue #3) did not prevent the engine's inventory-module validator from rejecting the resulting state at runtime. The multipliers remain accepted in config for forward compatibility but are no-ops in the PAK builder until a validator-aware patch path exists AND a character-save sanitizer can safely undo saved inflated state. Safe multipliers that still function: `loot`, `xp`, `craft_cost`, `crop_speed`, `cooking_speed`, `harvest_yield`.
+
 ### Fixed
 
 - **Added dashboard Character Repair for known progression drift ([#24](https://github.com/HumanGenome/WindrosePlus/issues/24)).** The authenticated dashboard now has a `/repair` page that accepts a zipped local `SaveProfiles` folder, runs a bundled fail-closed repair tool, and returns `windrose-save-repaired.zip`. Safe mode only fixes the known no-spend `RewardLevel < CurrentLevel` drift and refuses spent-point or unknown save shapes instead of hand-editing BSON.
