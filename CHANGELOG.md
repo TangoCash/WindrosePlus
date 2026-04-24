@@ -2,6 +2,10 @@
 
 ## [1.0.14] - 2026-04-23
 
+### Added
+
+- **Out-of-process Idle CPU Limiter release agent (`tools/WindrosePlusLimiterAgent.ps1`).** Watches inbound TCP connections on the game port and toggles the DLL's disable sentinel so the cap is lifted before a connecting client times out. The agent runs at normal priority outside the capped job, eliminating the race where the DLL's in-process release checks are themselves throttled to the idle rate. Opt-in: launch manually alongside the server or wire into your own start script.
+
 ### Fixed
 
 - **Added dashboard Character Repair for known progression drift ([#24](https://github.com/HumanGenome/WindrosePlus/issues/24)).** The authenticated dashboard now has a `/repair` page that accepts a zipped local `SaveProfiles` folder, runs a bundled fail-closed repair tool, and returns `windrose-save-repaired.zip`. Safe mode only fixes the known no-spend `RewardLevel < CurrentLevel` drift and refuses spent-point or unknown save shapes instead of hand-editing BSON.
