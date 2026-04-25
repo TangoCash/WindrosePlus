@@ -21,7 +21,7 @@ using namespace RC;
 using namespace RC::Unreal;
 
 static bool isR(const void*a,size_t l){MEMORY_BASIC_INFORMATION m;if(!VirtualQuery(a,&m,sizeof(m)))return false;if(m.State!=MEM_COMMIT)return false;if(m.Protect&(PAGE_NOACCESS|PAGE_GUARD))return false;return(uintptr_t)a+l<=(uintptr_t)m.BaseAddress+m.RegionSize;}
-static bool vp(uint64_t v){return v>0x10000000000ULL&&v<0x7FFFFFFFFFFFULL;}
+static bool vp(uint64_t v){return v>0x10000ULL&&v<0x7FFFFFFFFFFFULL;}
 
 class HeightmapExporter : public CppUserModBase {
 public:
