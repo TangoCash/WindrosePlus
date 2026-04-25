@@ -2,8 +2,13 @@
 -- Loads all modules, manages idle/active mode, drives update loops
 
 -- Global namespace — shared with all modules and third-party mods
+--
+-- VERSION below is rewritten from the git tag by .github/workflows/release.yml
+-- at release time. The literal here is the development default and may lag the
+-- latest CHANGELOG entry between tagged releases — that's flagged as a
+-- non-blocking warning by .github/workflows/version-check.yml.
 WindrosePlus = {
-    VERSION = "1.0.14",
+    VERSION = "1.0.16",
     state = {
         playerCount = 0,
         mode = "boot",           -- starts as "boot", transitions to "idle" or "active"
