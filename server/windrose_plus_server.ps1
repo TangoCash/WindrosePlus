@@ -575,6 +575,152 @@ try {
                     if ($safeConfig.rcon) { $safeConfig.rcon.password = "***" }
                     Send-Json $context $safeConfig
                 }
+                "/api/config/full" {
+                    $jsonPath = Join-Path $gameDir "windrose_plus.json"
+                    if (Test-Path -LiteralPath $jsonPath) {
+                        $raw = Get-Content -LiteralPath $jsonPath -Raw
+                        Send-Json $context @{ raw = $raw }
+                    } else {
+                        Send-Json $context @{ error = "Config file not found" } 404
+                    }
+                }
+                "/api/config/save" {
+                    if ($method -ne "POST") {
+                        Send-Json $context @{ error = "POST required" } 405
+                        continue
+                    }
+                    $reader = New-Object System.IO.StreamReader($context.Request.InputStream)
+                    $body = $reader.ReadToEnd()
+                    $newConfig = $null
+                    try {
+                        $newConfig = $body | ConvertFrom-Json
+                    } catch {
+                        Send-Json $context @{ error = "Invalid JSON: $($_.Exception.Message)" } 400
+                        continue
+                    }
+                    # Validate structure
+                    if (-not $newConfig.server) { $newConfig.server = @{} }
+                    if (-not $newConfig.rcon) { $newConfig.rcon = @{} }
+                    if (-not $newConfig.multipliers) { $newConfig.multipliers = @{} }
+                    if (-not $newConfig.admin) { $newConfig.admin = @{} }
+                    if (-not $newConfig.features) { $newConfig.features = @{} }
+                    if (-not $newConfig.query) { $newConfig.query = @{} }
+                    if (-not $newConfig.debug) { $newConfig.debug = @{} }
+
+                    # Clamp multiplier values to safe ranges
+                    $multRanges = @{
+                        loot = @(0.1, 100.0)
+                        xp = @(0.1, 100.0)
+                        stack_size = @(0.1, 100.0)
+                        craft_cost = @(0.1, 100.0)
+                        crop_speed = @(0.1, 100.0)
+                        cooking_speed = @(0.1, 100.0)
+                        harvest_yield = @(0.1, 100.0)
+                        weight = @(0.1, 10.0)
+                        inventory_size = @(0.5, 10.0)
+                    }
+                    foreach ($key in $multRanges.Keys) {
+                        $val = $newConfig.multipliers.$key
+                        if ($null -ne $val) {
+                            $v = [double]$val
+                            $min = $multRanges[$key][0]
+                            $max = $multRanges[$key][1]
+                            if ($v -lt $min) { $newConfig.multipliers.$key = $min }
+                            elseif ($v -gt $max) { $newConfig.multipliers.$key = $max }
+                        }
+                    }
+
+                    # Ensure server.http_port is a valid int
+                    $port = [int]$newConfig.server.http_port
+                    if ($port -lt 1 -or $port -gt 65535) {
+                        Send-Json $context @{ error = "Invalid http_port. Must be 1-65535." } 400
+                        continue
+                    }
+                    $newConfig.server.http_port = $port
+
+                    # Ensure admin.steam_ids is an array
+                    if ($newConfig.admin.steam_ids -is [string]) {
+                        $newConfig.admin.steam_ids = @($newConfig.admin.steam_ids -split "," | ForEach-Object { $_.Trim() } | Where-Object { $_ })
+                    } elseif ($newConfig.admin.steam_ids -is [array]) {
+                        $newConfig.admin.steam_ids = @($newConfig.admin.steam_ids | ForEach-Object { "$_.Trim()" } | Where-Object { $_ })
+                    } else {
+                        $newConfig.admin.steam_ids = @()
+                    }
+
+                    # Write atomically
+                    $jsonPath = Join-Path $gameDir "windrose_plus.json"
+                    try {
+                        Write-AtomicUtf8Json $jsonPath $newConfig
+                        # Update in-memory config reference
+                        $config = $newConfig
+                        Send-Json $context @{ status = "ok" }
+                    } catch {
+                        Send-Json $context @{ error = "Failed to save config: $($_.Exception.Message)" } 500
+                    }
+                }
+                "/api/config/ini/list" {
+                    $iniFiles = @("windrose_plus.ini", "windrose_plus.weapons.ini", "windrose_plus.food.ini", "windrose_plus.gear.ini", "windrose_plus.entities.ini")
+                    $result = @()
+                    foreach ($name in $iniFiles) {
+                        $path = Join-Path $gameDir $name
+                        $defaultPath = Join-Path $gameDir "windrose_plus\config\$($name -replace '\.ini$', '.default.ini')"
+                        $result += @{
+                            name = $name
+                            present = (Test-Path -LiteralPath $path)
+                            has_default = (Test-Path -LiteralPath $defaultPath)
+                        }
+                    }
+                    Send-Json $context @{ files = $result }
+                }
+                "/api/config/ini/read" {
+                    $name = $context.Request.QueryString["name"]
+                    $allowed = @("windrose_plus.ini", "windrose_plus.weapons.ini", "windrose_plus.food.ini", "windrose_plus.gear.ini", "windrose_plus.entities.ini")
+                    if (-not $name -or $allowed -notcontains $name) {
+                        Send-Json $context @{ error = "Invalid INI file name" } 400
+                        continue
+                    }
+                    $path = Join-Path $gameDir $name
+                    if (Test-Path -LiteralPath $path) {
+                        $raw = Get-Content -LiteralPath $path -Raw -Encoding UTF8
+                        Send-Json $context @{ name = $name; raw = $raw; exists = $true }
+                    } else {
+                        $defaultPath = Join-Path $gameDir "windrose_plus\config\$($name -replace '\.ini$', '.default.ini')"
+                        if (Test-Path -LiteralPath $defaultPath) {
+                            $raw = Get-Content -LiteralPath $defaultPath -Raw -Encoding UTF8
+                            Send-Json $context @{ name = $name; raw = $raw; exists = $false }
+                        } else {
+                            Send-Json $context @{ name = $name; raw = ""; exists = $false }
+                        }
+                    }
+                }
+                "/api/config/ini/save" {
+                    if ($method -ne "POST") {
+                        Send-Json $context @{ error = "POST required" } 405
+                        continue
+                    }
+                    $reader = New-Object System.IO.StreamReader($context.Request.InputStream)
+                    $body = $reader.ReadToEnd() | ConvertFrom-Json
+                    $name = $body.name
+                    $allowed = @("windrose_plus.ini", "windrose_plus.weapons.ini", "windrose_plus.food.ini", "windrose_plus.gear.ini", "windrose_plus.entities.ini")
+                    if (-not $name -or $allowed -notcontains $name) {
+                        Send-Json $context @{ error = "Invalid INI file name" } 400
+                        continue
+                    }
+                    $path = Join-Path $gameDir $name
+                    $content = $body.content
+                    if ($null -eq $content) { $content = "" }
+                    try {
+                        $tmpPath = "$path.tmp"
+                        [System.IO.File]::WriteAllText($tmpPath, $content, [System.Text.UTF8Encoding]::new($false))
+                        if (Test-Path -LiteralPath $path) {
+                            Remove-Item -LiteralPath $path -Force -ErrorAction SilentlyContinue
+                        }
+                        Move-Item -LiteralPath $tmpPath -Destination $path -Force
+                        Send-Json $context @{ status = "ok" }
+                    } catch {
+                        Send-Json $context @{ error = "Failed to save INI: $($_.Exception.Message)" } 500
+                    }
+                }
                 "/api/pak-status" {
                     $multPak = Join-Path $gameDir "R5\Content\Paks\WindrosePlus_Multipliers_P.pak"
                     $ctPak   = Join-Path $gameDir "R5\Content\Paks\WindrosePlus_CurveTables_P.pak"

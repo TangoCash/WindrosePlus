@@ -858,6 +858,122 @@
         .tab-content.active { display: flex; }
         #seachart-pane { position: relative; }
         #seachart-map { width: 100%; height: 100%; min-height: 300px; background: #141820; border-radius: 8px; }
+        /* Config editor styles */
+        .config-pane { display: flex; flex-direction: column; gap: 10px; overflow: hidden; }
+        .config-toolbar { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; }
+        .config-btn {
+            padding: 5px 12px;
+            background: linear-gradient(180deg, rgba(77,56,39,0.45), rgba(41,29,21,0.72));
+            border: 1px solid var(--border);
+            color: var(--text-dim);
+            font-family: 'Cinzel', serif;
+            font-size: 0.72rem;
+            font-weight: 700;
+            letter-spacing: 0.12em;
+            text-transform: uppercase;
+            cursor: pointer;
+            border-radius: 4px;
+            transition: all 0.2s;
+        }
+        .config-btn:hover { border-color: var(--accent); color: var(--accent); }
+        .config-btn.active { background: var(--accent-soft); color: var(--accent); border-color: var(--border-strong); }
+        .config-btn:disabled { opacity: 0.5; cursor: not-allowed; }
+        .config-body { flex: 1; overflow-y: auto; min-height: 0; }
+        .config-section { margin-bottom: 14px; }
+        .config-section-title {
+            font-family: 'Cinzel', serif;
+            font-size: 0.85rem;
+            letter-spacing: 0.08em;
+            text-transform: uppercase;
+            color: var(--accent);
+            margin: 0 0 8px;
+            padding-bottom: 4px;
+            border-bottom: 1px solid var(--border);
+        }
+        .config-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
+            gap: 8px 12px;
+        }
+        .config-field {
+            display: flex;
+            flex-direction: column;
+            gap: 3px;
+        }
+        .config-field label {
+            font-family: 'Cinzel', serif;
+            font-size: 0.68rem;
+            letter-spacing: 0.08em;
+            text-transform: uppercase;
+            color: var(--text-muted);
+        }
+        .config-field input[type="text"],
+        .config-field input[type="number"],
+        .config-field input[type="password"],
+        .config-field select {
+            padding: 6px 8px;
+            border-radius: 4px;
+            border: 1px solid var(--border);
+            background: rgba(18,12,9,0.74);
+            color: var(--text);
+            font-family: 'IBM Plex Mono', monospace;
+            font-size: 0.84rem;
+            outline: none;
+        }
+        .config-field input:focus, .config-field select:focus { border-color: var(--accent); }
+        .config-field .hint {
+            font-size: 0.72rem;
+            color: var(--text-muted);
+            font-style: italic;
+        }
+        .config-textarea {
+            width: 100%;
+            height: 100%;
+            min-height: 300px;
+            padding: 10px 12px;
+            border-radius: 6px;
+            border: 1px solid var(--border);
+            background: rgba(15,10,8,0.9);
+            color: var(--text);
+            font-family: 'IBM Plex Mono', monospace;
+            font-size: 0.82rem;
+            line-height: 1.5;
+            resize: vertical;
+            outline: none;
+        }
+        .config-textarea:focus { border-color: var(--accent); }
+        .config-msg {
+            padding: 6px 10px;
+            border-radius: 4px;
+            font-size: 0.85rem;
+            font-family: 'IBM Plex Mono', monospace;
+        }
+        .config-msg.ok { background: rgba(212,160,74,0.12); color: var(--accent); border: 1px solid rgba(212,160,74,0.3); }
+        .config-msg.err { background: rgba(211,125,102,0.12); color: var(--danger); border: 1px solid rgba(211,125,102,0.3); }
+        .config-savebar { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; }
+        .config-savebar button {
+            padding: 6px 16px;
+            background: var(--accent);
+            color: #1a1410;
+            border: none;
+            border-radius: 4px;
+            font-family: 'Cinzel', serif;
+            font-size: 0.75rem;
+            font-weight: 700;
+            letter-spacing: 0.1em;
+            text-transform: uppercase;
+            cursor: pointer;
+            transition: opacity 0.15s;
+        }
+        .config-savebar button:hover { opacity: 0.9; }
+        .config-savebar button.secondary {
+            background: transparent;
+            color: var(--accent);
+            border: 1px solid var(--accent);
+        }
+        @media (max-width: 760px) {
+            .config-grid { grid-template-columns: 1fr; }
+        }
     </style>
     <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
     <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
@@ -898,6 +1014,7 @@
                 <div class="dashboard-tabs">
                     <button class="dashboard-tab active" data-tab="console">CONSOLE</button>
                     <button class="dashboard-tab" data-tab="seachart">SEA CHART</button>
+                    <button class="dashboard-tab" data-tab="config">CONFIG</button>
                     <a class="dashboard-link" href="/repair">REPAIR</a>
                 </div>
                 <span id="status-badge">CONNECTING</span>
@@ -982,6 +1099,161 @@
             </div>
             <div class="tab-content" id="seachart-pane">
                 <div id="seachart-map"></div>
+            </div>
+            <div class="tab-content" id="config-pane">
+                <div class="config-pane">
+                    <div class="card" style="padding:10px 14px;">
+                        <div class="config-toolbar">
+                            <button class="config-btn active" id="cfg-tab-json" data-cfg="json">JSON</button>
+                            <button class="config-btn" id="cfg-tab-ini" data-cfg="ini">INI</button>
+                        </div>
+                    </div>
+                    <div class="card config-body" id="config-body" style="padding:14px;">
+                        <!-- JSON form view -->
+                        <div id="config-json-view">
+                            <div class="config-section">
+                                <div class="config-section-title">Server</div>
+                                <div class="config-grid">
+                                    <div class="config-field">
+                                        <label>HTTP Port</label>
+                                        <input type="number" id="cfg-http-port" min="1" max="65535">
+                                    </div>
+                                    <div class="config-field">
+                                        <label>Bind IP</label>
+                                        <input type="text" id="cfg-bind-ip" placeholder="0.0.0.0">
+                                        <span class="hint">Leave blank for all interfaces</span>
+                                    </div>
+                                </div>
+                            </div>
+                            <div class="config-section">
+                                <div class="config-section-title">RCON</div>
+                                <div class="config-grid">
+                                    <div class="config-field">
+                                        <label>Enabled</label>
+                                        <select id="cfg-rcon-enabled">
+                                            <option value="true">Yes</option>
+                                            <option value="false">No</option>
+                                        </select>
+                                    </div>
+                                    <div class="config-field">
+                                        <label>Password</label>
+                                        <input type="password" id="cfg-rcon-password" placeholder="Set a strong password">
+                                    </div>
+                                </div>
+                            </div>
+                            <div class="config-section">
+                                <div class="config-section-title">Multipliers</div>
+                                <div class="config-grid">
+                                    <div class="config-field">
+                                        <label>Loot</label>
+                                        <input type="number" id="cfg-mult-loot" min="0.1" max="100" step="0.1">
+                                    </div>
+                                    <div class="config-field">
+                                        <label>XP</label>
+                                        <input type="number" id="cfg-mult-xp" min="0.1" max="100" step="0.1">
+                                    </div>
+                                    <div class="config-field">
+                                        <label>Stack Size</label>
+                                        <input type="number" id="cfg-mult-stack" min="0.1" max="100" step="0.1">
+                                    </div>
+                                    <div class="config-field">
+                                        <label>Craft Cost</label>
+                                        <input type="number" id="cfg-mult-craft" min="0.1" max="100" step="0.1">
+                                    </div>
+                                    <div class="config-field">
+                                        <label>Crop Speed</label>
+                                        <input type="number" id="cfg-mult-crop" min="0.1" max="100" step="0.1">
+                                    </div>
+                                    <div class="config-field">
+                                        <label>Cooking Speed</label>
+                                        <input type="number" id="cfg-mult-cooking" min="0.1" max="100" step="0.1">
+                                    </div>
+                                    <div class="config-field">
+                                        <label>Harvest Yield</label>
+                                        <input type="number" id="cfg-mult-harvest" min="0.1" max="100" step="0.1">
+                                    </div>
+                                    <div class="config-field">
+                                        <label>Weight</label>
+                                        <input type="number" id="cfg-mult-weight" min="0.1" max="10" step="0.1">
+                                    </div>
+                                    <div class="config-field">
+                                        <label>Inventory Size</label>
+                                        <input type="number" id="cfg-mult-inventory" min="0.5" max="10" step="0.1">
+                                        <span class="hint">Back up saves before changing</span>
+                                    </div>
+                                </div>
+                            </div>
+                            <div class="config-section">
+                                <div class="config-section-title">Admin</div>
+                                <div class="config-grid">
+                                    <div class="config-field" style="grid-column: 1 / -1;">
+                                        <label>Admin Steam IDs (comma-separated)</label>
+                                        <input type="text" id="cfg-admin-steamids" placeholder="76561198000000000, 76561198000000001">
+                                    </div>
+                                </div>
+                            </div>
+                            <div class="config-section">
+                                <div class="config-section-title">Features</div>
+                                <div class="config-grid">
+                                    <div class="config-field">
+                                        <label>Unlock All Recipes</label>
+                                        <select id="cfg-feat-recipes">
+                                            <option value="true">Yes</option>
+                                            <option value="false">No</option>
+                                        </select>
+                                    </div>
+                                    <div class="config-field">
+                                        <label>Unlock All Ships</label>
+                                        <select id="cfg-feat-ships">
+                                            <option value="true">Yes</option>
+                                            <option value="false">No</option>
+                                        </select>
+                                    </div>
+                                </div>
+                            </div>
+                            <div class="config-section">
+                                <div class="config-section-title">Query</div>
+                                <div class="config-grid">
+                                    <div class="config-field">
+                                        <label>Enabled</label>
+                                        <select id="cfg-query-enabled">
+                                            <option value="true">Yes</option>
+                                            <option value="false">No</option>
+                                        </select>
+                                    </div>
+                                    <div class="config-field">
+                                        <label>Interval (ms)</label>
+                                        <input type="number" id="cfg-query-interval" min="1000" max="60000" step="1000">
+                                    </div>
+                                </div>
+                            </div>
+                            <div class="config-savebar" style="margin-top:6px;">
+                                <button id="cfg-save-json">Save JSON</button>
+                                <button class="secondary" id="cfg-reload-json">Reload</button>
+                                <span id="cfg-json-msg"></span>
+                            </div>
+                        </div>
+                        <!-- INI editor view -->
+                        <div id="config-ini-view" style="display:none;height:100%;flex-direction:column;gap:10px;">
+                            <div class="config-toolbar">
+                                <select id="cfg-ini-select" style="padding:5px 8px;background:rgba(18,12,9,0.74);border:1px solid var(--border);color:var(--text);font-family:'IBM Plex Mono',monospace;font-size:0.82rem;border-radius:4px;">
+                                    <option value="windrose_plus.ini">windrose_plus.ini</option>
+                                    <option value="windrose_plus.weapons.ini">windrose_plus.weapons.ini</option>
+                                    <option value="windrose_plus.food.ini">windrose_plus.food.ini</option>
+                                    <option value="windrose_plus.gear.ini">windrose_plus.gear.ini</option>
+                                    <option value="windrose_plus.entities.ini">windrose_plus.entities.ini</option>
+                                </select>
+                                <span id="cfg-ini-status" style="font-size:0.78rem;color:var(--text-muted);font-family:'IBM Plex Mono',monospace;"></span>
+                            </div>
+                            <textarea class="config-textarea" id="cfg-ini-editor" spellcheck="false"></textarea>
+                            <div class="config-savebar">
+                                <button id="cfg-save-ini">Save INI</button>
+                                <button class="secondary" id="cfg-reload-ini">Reload</button>
+                                <span id="cfg-ini-msg"></span>
+                            </div>
+                        </div>
+                    </div>
+                </div>
             </div>
 
             <!-- Hidden elements preserved for test compatibility -->
@@ -1528,7 +1800,8 @@
                 document.querySelectorAll('.dashboard-tab').forEach(function(b) { b.classList.remove('active'); });
                 this.classList.add('active');
                 document.querySelectorAll('.tab-content').forEach(function(p) { p.classList.remove('active'); });
-                document.getElementById(tab === 'console' ? 'console-pane' : 'seachart-pane').classList.add('active');
+                var paneId = tab === 'console' ? 'console-pane' : (tab === 'seachart' ? 'seachart-pane' : 'config-pane');
+                document.getElementById(paneId).classList.add('active');
 
                 if (tab === 'seachart' && !seachartInitialized) {
                     initSeaChart();
@@ -1536,8 +1809,169 @@
                 if (tab === 'seachart' && seachartMap) {
                     seachartMap.invalidateSize();
                 }
+                if (tab === 'config') {
+                    loadConfigJson();
+                }
             });
         });
+
+        // Config editor state
+        var currentConfigJson = null;
+        var currentIniFile = 'windrose_plus.ini';
+
+        // Config sub-tab switching
+        document.getElementById('cfg-tab-json').addEventListener('click', function() {
+            document.getElementById('cfg-tab-json').classList.add('active');
+            document.getElementById('cfg-tab-ini').classList.remove('active');
+            document.getElementById('config-json-view').style.display = 'block';
+            document.getElementById('config-ini-view').style.display = 'none';
+            loadConfigJson();
+        });
+        document.getElementById('cfg-tab-ini').addEventListener('click', function() {
+            document.getElementById('cfg-tab-ini').classList.add('active');
+            document.getElementById('cfg-tab-json').classList.remove('active');
+            document.getElementById('config-json-view').style.display = 'none';
+            document.getElementById('config-ini-view').style.display = 'flex';
+            loadConfigIni(currentIniFile);
+        });
+
+        function setCfgMsg(id, text, isErr) {
+            var el = document.getElementById(id);
+            if (!text) { el.textContent = ''; el.className = ''; return; }
+            el.textContent = text;
+            el.className = 'config-msg ' + (isErr ? 'err' : 'ok');
+        }
+
+        async function loadConfigJson() {
+            try {
+                var res = await fetch('/api/config/full');
+                var data = await res.json();
+                if (data.error) { setCfgMsg('cfg-json-msg', data.error, true); return; }
+                var cfg = JSON.parse(data.raw);
+                currentConfigJson = cfg;
+
+                document.getElementById('cfg-http-port').value = (cfg.server && cfg.server.http_port != null) ? cfg.server.http_port : 8780;
+                document.getElementById('cfg-bind-ip').value = (cfg.server && cfg.server.bind_ip != null) ? cfg.server.bind_ip : '';
+                document.getElementById('cfg-rcon-enabled').value = (cfg.rcon && cfg.rcon.enabled === true) ? 'true' : 'false';
+                document.getElementById('cfg-rcon-password').value = (cfg.rcon && cfg.rcon.password != null) ? cfg.rcon.password : '';
+
+                var m = cfg.multipliers || {};
+                document.getElementById('cfg-mult-loot').value = m.loot != null ? m.loot : 1;
+                document.getElementById('cfg-mult-xp').value = m.xp != null ? m.xp : 1;
+                document.getElementById('cfg-mult-stack').value = m.stack_size != null ? m.stack_size : 1;
+                document.getElementById('cfg-mult-craft').value = m.craft_cost != null ? m.craft_cost : 1;
+                document.getElementById('cfg-mult-crop').value = m.crop_speed != null ? m.crop_speed : 1;
+                document.getElementById('cfg-mult-cooking').value = m.cooking_speed != null ? m.cooking_speed : 1;
+                document.getElementById('cfg-mult-harvest').value = m.harvest_yield != null ? m.harvest_yield : 1;
+                document.getElementById('cfg-mult-weight').value = m.weight != null ? m.weight : 1;
+                document.getElementById('cfg-mult-inventory').value = m.inventory_size != null ? m.inventory_size : 1;
+
+                var admins = [];
+                if (cfg.admin && cfg.admin.steam_ids) {
+                    if (Array.isArray(cfg.admin.steam_ids)) admins = cfg.admin.steam_ids;
+                    else if (typeof cfg.admin.steam_ids === 'string') admins = cfg.admin.steam_ids.split(',').map(function(s){ return s.trim(); }).filter(function(s){ return s; });
+                }
+                document.getElementById('cfg-admin-steamids').value = admins.join(', ');
+
+                var feats = cfg.features || {};
+                document.getElementById('cfg-feat-recipes').value = feats.unlock_all_recipes === true ? 'true' : 'false';
+                document.getElementById('cfg-feat-ships').value = feats.unlock_all_ships === true ? 'true' : 'false';
+
+                var q = cfg.query || {};
+                document.getElementById('cfg-query-enabled').value = q.enabled !== false ? 'true' : 'false';
+                document.getElementById('cfg-query-interval').value = q.interval_ms != null ? q.interval_ms : 5000;
+            } catch (e) {
+                setCfgMsg('cfg-json-msg', 'Failed to load config: ' + e.message, true);
+            }
+        }
+
+        async function saveConfigJson() {
+            setCfgMsg('cfg-json-msg', 'Saving...', false);
+            var cfg = JSON.parse(JSON.stringify(currentConfigJson || {}));
+            if (!cfg.server) cfg.server = {};
+            if (!cfg.rcon) cfg.rcon = {};
+            if (!cfg.multipliers) cfg.multipliers = {};
+            if (!cfg.admin) cfg.admin = {};
+            if (!cfg.features) cfg.features = {};
+            if (!cfg.query) cfg.query = {};
+
+            cfg.server.http_port = parseInt(document.getElementById('cfg-http-port').value, 10) || 8780;
+            cfg.server.bind_ip = document.getElementById('cfg-bind-ip').value.trim();
+            cfg.rcon.enabled = document.getElementById('cfg-rcon-enabled').value === 'true';
+            cfg.rcon.password = document.getElementById('cfg-rcon-password').value;
+
+            cfg.multipliers.loot = parseFloat(document.getElementById('cfg-mult-loot').value) || 1;
+            cfg.multipliers.xp = parseFloat(document.getElementById('cfg-mult-xp').value) || 1;
+            cfg.multipliers.stack_size = parseFloat(document.getElementById('cfg-mult-stack').value) || 1;
+            cfg.multipliers.craft_cost = parseFloat(document.getElementById('cfg-mult-craft').value) || 1;
+            cfg.multipliers.crop_speed = parseFloat(document.getElementById('cfg-mult-crop').value) || 1;
+            cfg.multipliers.cooking_speed = parseFloat(document.getElementById('cfg-mult-cooking').value) || 1;
+            cfg.multipliers.harvest_yield = parseFloat(document.getElementById('cfg-mult-harvest').value) || 1;
+            cfg.multipliers.weight = parseFloat(document.getElementById('cfg-mult-weight').value) || 1;
+            cfg.multipliers.inventory_size = parseFloat(document.getElementById('cfg-mult-inventory').value) || 1;
+
+            var adminsStr = document.getElementById('cfg-admin-steamids').value.trim();
+            cfg.admin.steam_ids = adminsStr ? adminsStr.split(',').map(function(s){ return s.trim(); }).filter(function(s){ return s; }) : [];
+
+            cfg.features.unlock_all_recipes = document.getElementById('cfg-feat-recipes').value === 'true';
+            cfg.features.unlock_all_ships = document.getElementById('cfg-feat-ships').value === 'true';
+
+            cfg.query.enabled = document.getElementById('cfg-query-enabled').value === 'true';
+            cfg.query.interval_ms = parseInt(document.getElementById('cfg-query-interval').value, 10) || 5000;
+
+            try {
+                var res = await fetch('/api/config/save', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(cfg)
+                });
+                var data = await res.json();
+                if (data.error) { setCfgMsg('cfg-json-msg', data.error, true); }
+                else { setCfgMsg('cfg-json-msg', 'Saved successfully.', false); currentConfigJson = cfg; }
+            } catch (e) {
+                setCfgMsg('cfg-json-msg', 'Save failed: ' + e.message, true);
+            }
+        }
+
+        document.getElementById('cfg-save-json').addEventListener('click', saveConfigJson);
+        document.getElementById('cfg-reload-json').addEventListener('click', function() { loadConfigJson(); setCfgMsg('cfg-json-msg', 'Reloaded.', false); });
+
+        async function loadConfigIni(name) {
+            currentIniFile = name || currentIniFile;
+            document.getElementById('cfg-ini-select').value = currentIniFile;
+            setCfgMsg('cfg-ini-msg', 'Loading...', false);
+            try {
+                var res = await fetch('/api/config/ini/read?name=' + encodeURIComponent(currentIniFile));
+                var data = await res.json();
+                if (data.error) { setCfgMsg('cfg-ini-msg', data.error, true); return; }
+                document.getElementById('cfg-ini-editor').value = data.raw || '';
+                var status = data.exists ? 'Editing existing file' : 'Editing default template (file does not exist yet)';
+                document.getElementById('cfg-ini-status').textContent = status;
+                setCfgMsg('cfg-ini-msg', '', false);
+            } catch (e) {
+                setCfgMsg('cfg-ini-msg', 'Failed to load INI: ' + e.message, true);
+            }
+        }
+
+        async function saveConfigIni() {
+            setCfgMsg('cfg-ini-msg', 'Saving...', false);
+            try {
+                var res = await fetch('/api/config/ini/save', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ name: currentIniFile, content: document.getElementById('cfg-ini-editor').value })
+                });
+                var data = await res.json();
+                if (data.error) { setCfgMsg('cfg-ini-msg', data.error, true); }
+                else { setCfgMsg('cfg-ini-msg', 'Saved successfully.', false); document.getElementById('cfg-ini-status').textContent = 'Editing existing file'; }
+            } catch (e) {
+                setCfgMsg('cfg-ini-msg', 'Save failed: ' + e.message, true);
+            }
+        }
+
+        document.getElementById('cfg-save-ini').addEventListener('click', saveConfigIni);
+        document.getElementById('cfg-reload-ini').addEventListener('click', function() { loadConfigIni(currentIniFile); setCfgMsg('cfg-ini-msg', 'Reloaded.', false); });
+        document.getElementById('cfg-ini-select').addEventListener('change', function() { loadConfigIni(this.value); });
 
         function initSeaChart() {
             fetch("/api/mapinfo", {credentials: "same-origin"}).then(function(r) { return r.json(); }).then(function(mapInfo) {
