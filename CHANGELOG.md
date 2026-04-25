@@ -1,5 +1,13 @@
 # Changelog
 
+## [1.0.17] - 2026-04-25
+
+### Fixed
+
+- **PR
+- **PR
+- **add webif config
+
 ## [1.0.16] - 2026-04-24
 
 ### Fixed
